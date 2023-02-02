@@ -54,7 +54,7 @@ def train(args, extra_args):
     import torch.multiprocessing as mp
     mp.set_start_method("spawn")
     manager = mp.Manager()
-    num_agents = 1
+    num_agents = 3
 
     q_exp = []
     q_model = []
@@ -67,7 +67,7 @@ def train(args, extra_args):
     print('env_type: {}'.format(env_type))
 
 
-    algs = ['ppo2']
+    algs = ['a2c','ppo2','acer']
 
     for alg in algs:
         learn = get_learn_function(alg, alg+'_exp')
@@ -82,8 +82,8 @@ def train(args, extra_args):
         if args.network:
             alg_kwargs['network'] = args.network
         else:
-            if alg_kwargs.get('network') is None:
-                alg_kwargs['network'] = get_default_network(env_type)
+            #if alg_kwargs.get('network') is None:
+            alg_kwargs['network'] = get_default_network(env_type)
 
         print('Training {} on {}:{} with arguments \n{}'.format(alg, env_type, env_id, alg_kwargs))
 

@@ -109,6 +109,10 @@ class Model(object):
         # zip aggregate each gradient with parameters associated
         # For instance zip(ABCD, xyza) => Ax, By, Cz, Da
 
+        def _step(observation, **kwargs):
+            act_model_p = tf.nn.softmax(act_model.pi)
+            return act_model._evaluate([act_model.action, act_model_p, act_model.state], observation, **kwargs)
+
         self.grads = grads
         self.var = var
         self._train_op = self.trainer.apply_gradients(grads_and_var)
@@ -121,6 +125,7 @@ class Model(object):
         self.step = act_model.step
         self.value = act_model.value
         self.initial_state = act_model.initial_state
+        self._step = _step
 
         self.save = functools.partial(save_variables, sess=sess)
         self.load = functools.partial(load_variables, sess=sess)
@@ -129,6 +134,10 @@ class Model(object):
         global_variables = tf.get_collection(tf.GraphKeys.GLOBAL_VARIABLES, scope="")
         if MPI is not None:
             sync_from_root(sess, global_variables, comm=comm) #pylint: disable=E1101
+
+        #def _step(observation, **kwargs):
+        #    act_model_p = tf.nn.softmax(act_model.pi)
+        #    return act_model._evaluate([act_model.action, act_model_p, act_model.state], observation, **kwargs)
 
     def train(self, lr, cliprange, obs, returns, masks, actions, values, neglogpacs, states=None):
         # Here we calculate advantage A(s,a) = R + yV(s') - V(s)
@@ -156,4 +165,3 @@ class Model(object):
             self.stats_list + [self._train_op],
             td_map
         )[:-1]
-

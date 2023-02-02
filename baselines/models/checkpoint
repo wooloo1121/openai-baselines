@@ -1,0 +1,2 @@
+model_checkpoint_path: "trpo_humanoidv2"
+all_model_checkpoint_paths: "trpo_humanoidv2"

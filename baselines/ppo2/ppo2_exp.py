@@ -215,6 +215,7 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
 
     # Get the nb of env
     nenvs = env.num_envs
+    print("ppo2 nenvs: " + str(nenvs))
 
     # Get state_space and action_space
     ob_space = env.observation_space
@@ -237,9 +238,9 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
     if load_path is not None:
         model.load(load_path)
     # Instantiate the runner object
-    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam)
+    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam, q_exp=q_exp, q_model=q_model)
     if eval_env is not None:
-        eval_runner = Runner(env = eval_env, model = model, nsteps = nsteps, gamma = gamma, lam= lam)
+        eval_runner = Runner(env = eval_env, model = model, nsteps = nsteps, gamma = gamma, lam = lam, EVAL=True)
 
     epinfobuf = deque(maxlen=100)
     if eval_env is not None:
@@ -253,6 +254,7 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
 
     nupdates = total_timesteps//nbatch
     for update in range(1, nupdates+1):
+        print("ppo2 update: " + str(update))
         assert nbatch % nminibatches == 0
         # Start timer
         tstart = time.perf_counter()
@@ -264,47 +266,52 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
 
         if update % log_interval == 0 and is_mpi_root: logger.info('Stepping environment...')
 
+        ret = runner.run()
+        for i in range(len(ret)):
         # Get minibatch
-        obs, returns, masks, actions, values, neglogpacs, states, epinfos = runner.run() #pylint: disable=E0632
-        if eval_env is not None:
-            eval_obs, eval_returns, eval_masks, eval_actions, eval_values, eval_neglogpacs, eval_states, eval_epinfos = eval_runner.run() #pylint: disable=E0632
+            #print("ppo2 i: " + str(i))
+            obs, returns, masks, actions, values, neglogpacs, states, epinfos = ret[i]#runner.run() #pylint: disable=E0632
+            if eval_env is not None and i == 0:
+                eval_obs, eval_returns, eval_masks, eval_actions, eval_values, eval_neglogpacs, eval_states, eval_epinfos = eval_runner.run() #pylint: disable=E0632
 
-        if update % log_interval == 0 and is_mpi_root: logger.info('Done.')
+            if update % log_interval == 0 and is_mpi_root: logger.info('Done.')
 
-        epinfobuf.extend(epinfos)
-        if eval_env is not None:
-            eval_epinfobuf.extend(eval_epinfos)
+            epinfobuf.extend(epinfos)
+            if eval_env is not None and i == 0:
+                eval_epinfobuf.extend(eval_epinfos)
 
-        # Here what we're going to do is for each minibatch calculate the loss and append it.
-        mblossvals = []
-        if states is None: # nonrecurrent version
-            # Index of each element of batch_size
-            # Create the indices array
-            inds = np.arange(nbatch)
-            for _ in range(noptepochs):
-                # Randomize the indexes
-                np.random.shuffle(inds)
-                # 0 to batch_size with batch_train_size step
-                for start in range(0, nbatch, nbatch_train):
-                    end = start + nbatch_train
-                    mbinds = inds[start:end]
-                    slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
-                    mblossvals.append(model.train(lrnow, cliprangenow, *slices))
-        else: # recurrent version
-            assert nenvs % nminibatches == 0
-            envsperbatch = nenvs // nminibatches
-            envinds = np.arange(nenvs)
-            flatinds = np.arange(nenvs * nsteps).reshape(nenvs, nsteps)
-            for _ in range(noptepochs):
-                np.random.shuffle(envinds)
-                for start in range(0, nenvs, envsperbatch):
-                    end = start + envsperbatch
-                    mbenvinds = envinds[start:end]
-                    mbflatinds = flatinds[mbenvinds].ravel()
-                    slices = (arr[mbflatinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
-                    mbstates = states[mbenvinds]
-                    mblossvals.append(model.train(lrnow, cliprangenow, *slices, states=mbstates))
+            # Here what we're going to do is for each minibatch calculate the loss and append it.
+            mblossvals = []
+            if states is None: # nonrecurrent version
+                # Index of each element of batch_size
+                # Create the indices array
+                inds = np.arange(nbatch)
+                for _ in range(noptepochs):
+                    # Randomize the indexes
+                    np.random.shuffle(inds)
+                    # 0 to batch_size with batch_train_size step
+                    for start in range(0, nbatch, nbatch_train):
+                        end = start + nbatch_train
+                        mbinds = inds[start:end]
+                        slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
+                        mblossvals.append(model.train(lrnow, cliprangenow, *slices))
+            else: # recurrent version
+                assert nenvs % nminibatches == 0
+                envsperbatch = nenvs // nminibatches
+                envinds = np.arange(nenvs)
+                flatinds = np.arange(nenvs * nsteps).reshape(nenvs, nsteps)
+                for _ in range(noptepochs):
+                    np.random.shuffle(envinds)
+                    for start in range(0, nenvs, envsperbatch):
+                        end = start + envsperbatch
+                        mbenvinds = envinds[start:end]
+                        mbflatinds = flatinds[mbenvinds].ravel()
+                        slices = (arr[mbflatinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
+                        mbstates = states[mbenvinds]
+                        mblossvals.append(model.train(lrnow, cliprangenow, *slices, states=mbstates))
 
+        #params = tf.trainable_variables('ppo2_model')
+        #q_model[1].put(params)
         # Feedforward --> get losses --> update
         lossvals = np.mean(mblossvals, axis=0)
         # End timer
