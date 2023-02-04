@@ -16,6 +16,7 @@ class Runner(AbstractEnvRunner):
         nenv = self.nenv
         self.nbatch = nenv * nsteps
         self.batch_ob_shape_acer = (nenv*(nsteps+1),) + env.observation_space.shape
+        self.batch_shape = (4*(2048+1),) + env.observation_space.shape
 
         self.obs = env.reset()
         self.obs_dtype = env.observation_space.dtype
@@ -25,7 +26,9 @@ class Runner(AbstractEnvRunner):
         self.q_exp = q_exp
         self.q_model = q_model
         self.ob_dtype = model.train_model.X.dtype.as_numpy_dtype
-        self.batch_action_shape = [x if x is not None else -1 for x in model.train_model.action.shape.as_list()]
+        #print("!!!!! acer batch_action_shape: " + str(model.train_model.action.shape.as_list()))
+        self.batch_action_shape = [2048]
+        #[x if x is not None else -1 for x in model.train_model.action.shape.as_list()]
 
         self.gamma = 0.99
         self.lam=0.95

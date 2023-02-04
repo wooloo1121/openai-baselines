@@ -378,22 +378,47 @@ class Acer():
         for i in range(length):
             if i != 0:
                 enc_obs, obs, actions, rewards, mus, dones, masks = ret[i]
+                #print("acer actions shape: " + str(np.shape(actions)))
+                if len(actions.flatten()) > 2048:
+                    #print("actions > 2048")
+                    #batch_shape = (4*(2048+1),) + env.observation_space.shape
+                    inds = np.arange(8196)
+                    for start in range(0, 8192, 2048):
+                        end1 = start + 2052
+                        end2 = start + 2048
+                        mbinds1 = inds[start:end1]
+                        mbinds2 = inds[start:end2]
+                        slices1 = [arr[mbinds1] for arr in (obs.reshape(runner.batch_shape), masks.reshape([runner.batch_shape[0]]))]
+                        slices2 = [arr[mbinds2] for arr in (actions.reshape([8192]), rewards.reshape([8192]), mus.reshape([8192, 6]), dones.reshape([8192]))]
+                        names_ops, values_ops = model.train(slices1[0], slices2[0], slices2[1], slices2[3], slices2[2], model.initial_state, slices1[1], steps)
+                else:
+                    #print("actions <= 2048")
+                    #print("acer obs shape: " + str(np.shape(obs)))
+                    obs = obs.reshape(runner.batch_ob_shape_acer)
+                    actions = actions.reshape([runner.nbatch])
+                    rewards = rewards.reshape([runner.nbatch])
+                    mus = mus.reshape([runner.nbatch, runner.nact])
+                    dones = dones.reshape([runner.nbatch])
+                    masks = masks.reshape([runner.batch_ob_shape_acer[0]])
+
+                    names_ops, values_ops = model.train(obs, actions, rewards, dones, mus, model.initial_state, masks, steps)
             # reshape stuff correctly
             #print("i: " + str(i))
             #print("acer obs shape: ")
             #print(np.shape(obs))
-            obs = obs.reshape(runner.batch_ob_shape_acer)
-            actions = actions.reshape([runner.nbatch])
-            rewards = rewards.reshape([runner.nbatch])
-            mus = mus.reshape([runner.nbatch, runner.nact])
-            dones = dones.reshape([runner.nbatch])
-            masks = masks.reshape([runner.batch_ob_shape_acer[0]])
+            else:
+                obs = obs.reshape(runner.batch_ob_shape_acer)
+                actions = actions.reshape([runner.nbatch])
+                rewards = rewards.reshape([runner.nbatch])
+                mus = mus.reshape([runner.nbatch, runner.nact])
+                dones = dones.reshape([runner.nbatch])
+                masks = masks.reshape([runner.batch_ob_shape_acer[0]])
 
-            names_ops, values_ops = model.train(obs, actions, rewards, dones, mus, model.initial_state, masks, steps)
+                names_ops, values_ops = model.train(obs, actions, rewards, dones, mus, model.initial_state, masks, steps)
 
         #params = find_trainable_variables("acer_model")
         #self.q_model[2].put(params)
-
+        print("acer update: " + str(int(steps/runner.nbatch)))
         if on_policy and (int(steps/runner.nbatch) % self.log_interval == 0):
             logger.record_tabular("total_timesteps", steps)
             logger.record_tabular("fps", int(steps/(time.time() - self.tstart)))
@@ -407,7 +432,7 @@ class Acer():
             logger.dump_tabular()
 
 
-def learn(args, extra_args, q_exp, q_model, network, nsteps=20, q_coef=0.5, ent_coef=0.01,
+def learn(args, extra_args, q_exp, q_model, network, nsteps=512, q_coef=0.5, ent_coef=0.01,
           max_grad_norm=10, lr=7e-4, lrschedule='linear', rprop_epsilon=1e-5, rprop_alpha=0.99, gamma=0.99,
           log_interval=100, buffer_size=50000, replay_ratio=4, replay_start=10000, c=10.0,
           trust_region=True, alpha=0.99, delta=1, load_path=None):
