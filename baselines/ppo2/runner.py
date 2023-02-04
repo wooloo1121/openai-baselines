@@ -22,6 +22,7 @@ class Runner(AbstractEnvRunner):
         self.obs_dtype = env.observation_space.dtype
         self.ac_dtype = env.action_space.dtype
         self.ob_dtype = model.train_model.X.dtype.as_numpy_dtype
+        #print("!!!!! ppo2 batch_action_shape: " + str(model.train_model.action.shape.as_list()))
         self.batch_action_shape = [x if x is not None else -1 for x in model.train_model.action.shape.as_list()]
         self.EVAL = EVAL
 
@@ -137,14 +138,34 @@ class Runner(AbstractEnvRunner):
         if self.EVAL:
             return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)), mb_states, epinfos)
         else:
-            exp_acer = [enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones_acer, mb_masks]
-            exp_a2c = [mb_obs_a2c, mb_states, mb_rewards_a2c.flatten(), mb_masks_a2c.flatten(), mb_actions_a2c.reshape(self.batch_action_shape), mb_values_a2c.flatten(), epinfos]
+            #print("ppo2 a2c mb_obs_a2c: " + str(np.shape(mb_obs_a2c)))
+            #print("ppo2 a2c mb_obs_a2c[0]: " + str(np.shape(mb_obs_a2c[0])))
+            #print("ppo2 a2c mb_states: " + str(mb_states))
+            #print("ppo2 a2c mb_rewards_a2c: " + str(np.shape(mb_rewards_a2c)))
+            #print("ppo2 a2c mb_masks_a2c: " + str(np.shape(mb_masks_a2c)))
+            #print("ppo2 a2c mb_actions_a2c: " + str(np.shape(mb_actions_a2c)))
+            #print("ppo2 a2c mb_values_a2c: " + str(np.shape(mb_values_a2c)))
+            #print("ppo2 a2c epinfos: " + str(np.shape(epinfos)))
+            inds = np.arange(8192)
+            for start in range(0, 8192, 2048):
+                end = start + 2048
+                mbinds = inds[start:end]
+                slices = [arr[mbinds] for arr in (mb_obs_a2c, mb_rewards_a2c.flatten(), mb_masks_a2c.flatten(), mb_actions_a2c.flatten(), mb_values_a2c.flatten())]
+                exp_a2c = [slices[0], mb_states, slices[1], slices[2], slices[3], slices[4]]
+                if start == 0:
+                    exp_a2c.append(epinfos)
+                else:
+                    exp_a2c.append(None)
 
-            self.q_exp[0].put(exp_a2c)
+                self.q_exp[0].put(exp_a2c)
+
+            exp_acer = [enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones_acer, mb_masks]
             self.q_exp[2].put(exp_acer)
 
             ret = []
             ret.append([*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)), mb_states, epinfos])
+            #print("ppo2 mb_actions shape: ")
+            #print(np.shape(ret[0][3]))
 
             while not self.q_exp[1].empty():
                 exp_ppo2 = self.q_exp[1].get()

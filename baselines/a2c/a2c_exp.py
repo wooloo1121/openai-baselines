@@ -250,7 +250,7 @@ def learn(
     q_exp,
     q_model,
     network,
-    nsteps=5,
+    nsteps=512,
     vf_coef=0.5,
     ent_coef=0.01,
     max_grad_norm=0.5,
@@ -342,11 +342,13 @@ def learn(
     tstart = time.time()
 
     for update in range(1, total_timesteps//nbatch+1):
+        print("a2c update: " + str(update))
         # Get mini batch of experiences
         ret = runner.run()
         for i in range(len(ret)):
             obs, states, rewards, masks, actions, values, epinfos = ret[i]#runner.run()
-            epinfobuf.extend(epinfos)
+            if epinfos is not None:
+                epinfobuf.extend(epinfos)
             #print("a2c train i: " + str(i))
             policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
         #params = find_trainable_variables("a2c_model")

@@ -17,6 +17,7 @@ class Runner(AbstractEnvRunner):
         self.gamma = gamma
         nenv = self.nenv
         self.batch_ob_shape_acer = (nenv*(nsteps+1),) + env.observation_space.shape
+        #print("!!!!!! a2c batch_action_shape: " + str(model.train_model.action.shape.as_list()))
         self.batch_action_shape = [x if x is not None else -1 for x in model.train_model.action.shape.as_list()]
         #print("a2c batch action shape: " + str(self.batch_action_shape))
         self.ob_dtype = model.train_model.X.dtype.as_numpy_dtype

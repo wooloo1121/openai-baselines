@@ -288,13 +288,23 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
                 inds = np.arange(nbatch)
                 for _ in range(noptepochs):
                     # Randomize the indexes
-                    np.random.shuffle(inds)
+                    if i == 0:
+                        np.random.shuffle(inds)
                     # 0 to batch_size with batch_train_size step
                     for start in range(0, nbatch, nbatch_train):
                         end = start + nbatch_train
                         mbinds = inds[start:end]
+                        #print("ppo2 i: " + str(i))
+                        #print("ppo2 obs shape: " + str(np.shape(obs)))
+                        #print("ppo2 returns: " + str(np.shape(returns)))
+                        #print("ppo2 masks: " + str(np.shape(masks)))
+                        #print("ppo2 actions: " + str(actions))
+                        #print("ppo2 values: " + str(values))
+                        #print("ppo2 neglogpacs: " + str(np.shape(neglogpacs)))
                         slices = (arr[mbinds] for arr in (obs, returns, masks, actions, values, neglogpacs))
                         mblossvals.append(model.train(lrnow, cliprangenow, *slices))
+                        if i != 0:
+                            break
             else: # recurrent version
                 assert nenvs % nminibatches == 0
                 envsperbatch = nenvs // nminibatches
