@@ -41,6 +41,7 @@ class PolicyWithValue(object):
         vf_latent = vf_latent if vf_latent is not None else latent
 
         vf_latent = tf.layers.flatten(vf_latent)
+        self.latent = latent
         latent = tf.layers.flatten(latent)
 
         # Based on the action space, will select what probability distribution type
@@ -55,9 +56,9 @@ class PolicyWithValue(object):
         self.neglogp = self.pd.neglogp(self.action)
         self.sess = sess or tf.get_default_session()
 
+        assert isinstance(env.action_space, gym.spaces.Discrete)
+        self.q = fc(vf_latent, 'q', env.action_space.n)
         if estimate_q:
-            assert isinstance(env.action_space, gym.spaces.Discrete)
-            self.q = fc(vf_latent, 'q', env.action_space.n)
             self.vf = self.q
         else:
             self.vf = fc(vf_latent, 'vf', 1)

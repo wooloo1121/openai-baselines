@@ -2,7 +2,8 @@ import time
 import functools
 import numpy as np
 import tensorflow as tf
-from baselines import logger
+#from baselines import logger
+from baselines.logger import configure
 
 from baselines.common import set_global_seeds
 from baselines.common.policies import build_policy
@@ -178,11 +179,12 @@ def q_retrace(R, D, q_i, v, rho_i, nenvs, nsteps, gamma):
 #     return tf.minimum(1 + eps_clip, tf.maximum(1 - eps_clip, ratio))
 
 class Model(object):
-    def __init__(self, policy, ob_space, ac_space, nenvs, nsteps, ent_coef, q_coef, gamma, max_grad_norm, lr,
+    def __init__(self, model_type, policy, ob_space, ac_space, nenvs, nsteps, ent_coef, q_coef, gamma, max_grad_norm, lr,
                  rprop_alpha, rprop_epsilon, total_timesteps, lrschedule,
                  c, trust_region, alpha, delta):
 
         sess = get_session()
+        self.sess = sess
         nact = ac_space.n
         nbatch = nenvs * nsteps
 
@@ -195,13 +197,13 @@ class Model(object):
 
         step_ob_placeholder = tf.placeholder(dtype=ob_space.dtype, shape=(nenvs,) + ob_space.shape)
         train_ob_placeholder = tf.placeholder(dtype=ob_space.dtype, shape=(nenvs*(nsteps+1),) + ob_space.shape)
-        with tf.variable_scope('acer_model', reuse=tf.AUTO_REUSE):
+        with tf.variable_scope(model_type, reuse=tf.AUTO_REUSE):
 
             step_model = policy(nbatch=nenvs, nsteps=1, observ_placeholder=step_ob_placeholder, sess=sess)
             train_model = policy(nbatch=nbatch, nsteps=nsteps, observ_placeholder=train_ob_placeholder, sess=sess)
 
 
-        params = find_trainable_variables("acer_model")
+        params = find_trainable_variables(model_type)
         print("Params {}".format(len(params)))
         for var in params:
             print(var)
@@ -215,7 +217,7 @@ class Model(object):
             print(v.name)
             return v
 
-        with tf.variable_scope("acer_model", custom_getter=custom_getter, reuse=True):
+        with tf.variable_scope(model_type, custom_getter=custom_getter, reuse=True):
             polyak_model = policy(nbatch=nbatch, nsteps=nsteps, observ_placeholder=train_ob_placeholder, sess=sess)
 
         # Notation: (var) = batch variable, (var)s = seqeuence variable, (var)_i = variable index by action at step i
@@ -351,7 +353,7 @@ class Model(object):
 
 
 class Acer():
-    def __init__(self, runner, model, buffer, log_interval, q_model):
+    def __init__(self, runner, model, buffer, log_interval, q_model, logger):
         self.runner = runner
         self.model = model
         self.buffer = buffer
@@ -360,6 +362,7 @@ class Acer():
         self.episode_stats = EpisodeStats(runner.nsteps, runner.nenv)
         self.steps = None
         self.q_model = q_model
+        self.logger = logger
 
     def call(self, on_policy):
         runner, model, buffer, steps = self.runner, self.model, self.buffer, self.steps
@@ -382,10 +385,10 @@ class Acer():
                 if len(actions.flatten()) > 2048:
                     #print("actions > 2048")
                     #batch_shape = (4*(2048+1),) + env.observation_space.shape
-                    inds = np.arange(8196)
+                    inds = np.arange(8192)
                     for start in range(0, 8192, 2048):
-                        end1 = start + 2052
-                        end2 = start + 2048
+                        end1 = start + 2048
+                        end2 = start + 2044
                         mbinds1 = inds[start:end1]
                         mbinds2 = inds[start:end2]
                         slices1 = [arr[mbinds1] for arr in (obs.reshape(runner.batch_shape), masks.reshape([runner.batch_shape[0]]))]
@@ -407,6 +410,14 @@ class Acer():
             #print("acer obs shape: ")
             #print(np.shape(obs))
             else:
+                #TODO: check why get none here after change nsteps from 512 to 511
+                flag = 0
+                for j in range(5):
+                    if np.shape(obs)[j] == 0:
+                        flag = 1
+                if flag == 1:
+                    break
+                #print("acer buffer obs: " + str(np.shape(obs)))
                 obs = obs.reshape(runner.batch_ob_shape_acer)
                 actions = actions.reshape([runner.nbatch])
                 rewards = rewards.reshape([runner.nbatch])
@@ -416,25 +427,29 @@ class Acer():
 
                 names_ops, values_ops = model.train(obs, actions, rewards, dones, mus, model.initial_state, masks, steps)
 
-        #params = find_trainable_variables("acer_model")
-        #self.q_model[2].put(params)
+        params = find_trainable_variables("acer_model")
+        #for var in params:
+        #    print(var.name)
+        param_val = self.model.sess.run(params)
+        self.q_model[2].put(param_val)
+
         print("acer update: " + str(int(steps/runner.nbatch)))
         if on_policy and (int(steps/runner.nbatch) % self.log_interval == 0):
-            logger.record_tabular("total_timesteps", steps)
-            logger.record_tabular("fps", int(steps/(time.time() - self.tstart)))
+            self.logger.logkv("total_timesteps", steps)
+            self.logger.logkv("fps", int(steps/(time.time() - self.tstart)))
             # IMP: In EpisodicLife env, during training, we get done=True at each loss of life, not just at the terminal state.
             # Thus, this is mean until end of life, not end of episode.
             # For true episode rewards, see the monitor files in the log folder.
-            logger.record_tabular("mean_episode_length", self.episode_stats.mean_length())
-            logger.record_tabular("mean_episode_reward", self.episode_stats.mean_reward())
+            self.logger.logkv("mean_episode_length", self.episode_stats.mean_length())
+            self.logger.logkv("mean_episode_reward", self.episode_stats.mean_reward())
             for name, val in zip(names_ops, values_ops):
-                logger.record_tabular(name, float(val))
-            logger.dump_tabular()
+                self.logger.logkv(name, float(val))
+            self.logger.dumpkvs()
 
 
-def learn(args, extra_args, q_exp, q_model, network, nsteps=512, q_coef=0.5, ent_coef=0.01,
+def learn(args, extra_args, q_exp, q_model, network, nsteps=511, q_coef=0.5, ent_coef=0.01,
           max_grad_norm=10, lr=7e-4, lrschedule='linear', rprop_epsilon=1e-5, rprop_alpha=0.99, gamma=0.99,
-          log_interval=100, buffer_size=50000, replay_ratio=4, replay_start=10000, c=10.0,
+          log_interval=10, buffer_size=50000, replay_ratio=4, replay_start=10000, c=10.0,
           trust_region=True, alpha=0.99, delta=1, load_path=None):
 
     '''
@@ -500,6 +515,7 @@ def learn(args, extra_args, q_exp, q_model, network, nsteps=512, q_coef=0.5, ent
                                     For instance, 'mlp' network architecture has arguments num_hidden and num_layers.
 
     '''
+    logger = configure(args.log_path)
 
     env = build_env(args)
     if args.save_video_interval != 0:
@@ -524,7 +540,17 @@ def learn(args, extra_args, q_exp, q_model, network, nsteps=512, q_coef=0.5, ent
     ac_space = env.action_space
 
     nstack = env.nstack
-    model = Model(policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs, nsteps=nsteps,
+    model = Model(model_type='acer_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs, nsteps=nsteps,
+                  ent_coef=ent_coef, q_coef=q_coef, gamma=gamma,
+                  max_grad_norm=max_grad_norm, lr=lr, rprop_alpha=rprop_alpha, rprop_epsilon=rprop_epsilon,
+                  total_timesteps=total_timesteps, lrschedule=lrschedule, c=c,
+                  trust_region=trust_region, alpha=alpha, delta=delta)
+    model_a2c = Model(model_type='a2c_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs, nsteps=nsteps,
+                  ent_coef=ent_coef, q_coef=q_coef, gamma=gamma,
+                  max_grad_norm=max_grad_norm, lr=lr, rprop_alpha=rprop_alpha, rprop_epsilon=rprop_epsilon,
+                  total_timesteps=total_timesteps, lrschedule=lrschedule, c=c,
+                  trust_region=trust_region, alpha=alpha, delta=delta)
+    model_ppo2 = Model(model_type='ppo2_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs, nsteps=nsteps,
                   ent_coef=ent_coef, q_coef=q_coef, gamma=gamma,
                   max_grad_norm=max_grad_norm, lr=lr, rprop_alpha=rprop_alpha, rprop_epsilon=rprop_epsilon,
                   total_timesteps=total_timesteps, lrschedule=lrschedule, c=c,
@@ -533,13 +559,13 @@ def learn(args, extra_args, q_exp, q_model, network, nsteps=512, q_coef=0.5, ent
     if load_path is not None:
         model.load(load_path)
 
-    runner = Runner(env=env, model=model, nsteps=nsteps, q_exp=q_exp, q_model=q_model)
+    runner = Runner(env=env, model=model, nsteps=nsteps, q_exp=q_exp, q_model=q_model, model_a2c=model_a2c, model_ppo2=model_ppo2)
     if replay_ratio > 0:
         buffer = Buffer(env=env, nsteps=nsteps, size=buffer_size)
     else:
         buffer = None
     nbatch = nenvs*nsteps
-    acer = Acer(runner, model, buffer, log_interval, q_model)
+    acer = Acer(runner, model, buffer, log_interval, q_model, logger)
     acer.tstart = time.time()
 
     for acer.steps in range(0, total_timesteps, nbatch): #nbatch samples, 1 on_policy call and multiple off-policy calls

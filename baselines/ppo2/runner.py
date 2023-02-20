@@ -1,6 +1,7 @@
 import numpy as np
 from baselines.common.runners import AbstractEnvRunner
 from baselines.a2c.utils import discount_with_dones
+import tensorflow as tf
 
 class Runner(AbstractEnvRunner):
     """
@@ -11,7 +12,7 @@ class Runner(AbstractEnvRunner):
     run():
     - Make a mini batch
     """
-    def __init__(self, *, env, model, nsteps, gamma, lam, q_exp=None, q_model=None, EVAL=False):
+    def __init__(self, *, env, model, nsteps, gamma, lam, q_exp=None, q_model=None, EVAL=False, model_a2c=None, model_acer=None):
         super().__init__(env=env, model=model, nsteps=nsteps)
         # Lambda used in GAE (General Advantage Estimation)
         self.lam = lam
@@ -19,6 +20,8 @@ class Runner(AbstractEnvRunner):
         self.gamma = gamma
         self.q_exp = q_exp
         self.q_model = q_model
+        self.model_a2c = model_a2c
+        self.model_acer = model_acer
         self.obs_dtype = env.observation_space.dtype
         self.ac_dtype = env.action_space.dtype
         self.ob_dtype = model.train_model.X.dtype.as_numpy_dtype
@@ -32,6 +35,21 @@ class Runner(AbstractEnvRunner):
         self.nc = self.batch_ob_shape_acer[-1] // self.nstack
 
     def run(self):
+        a2c_param = None
+        while not self.q_model[0].empty():
+            a2c_param = self.q_model[0].get()
+        if a2c_param:
+            params = tf.trainable_variables("a2c_model")
+            for i in range(len(params)):
+                params[i].assign(a2c_param[i])
+        acer_param = None
+        while not self.q_model[2].empty():
+            acer_param = self.q_model[2].get()
+        if acer_param:
+            params = tf.trainable_variables("acer_model")
+            for i in range(len(params)-2):
+                params[i].assign(acer_param[i])
+
         # Here, we init the lists that will contain the mb of experiences
         enc_obs = np.split(self.env.stackedobs, self.env.nstack, axis=-1)
         mb_obs, mb_obs_acer, mb_rewards, mb_rewards_a2c, mb_actions, mb_values, mb_dones, mb_dones_acer, mb_neglogpacs, mb_mus = [], [], [], [], [], [], [], [], [], []

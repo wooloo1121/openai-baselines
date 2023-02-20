@@ -1,6 +1,7 @@
 import numpy as np
 from baselines.a2c.utils import discount_with_dones
 from baselines.common.runners import AbstractEnvRunner
+import tensorflow as tf
 
 class Runner(AbstractEnvRunner):
     """
@@ -12,7 +13,7 @@ class Runner(AbstractEnvRunner):
     run():
     - Make a mini batch of experiences
     """
-    def __init__(self, env, model, q_exp, q_model, nsteps=5, gamma=0.99):
+    def __init__(self, env, model, q_exp, q_model, model_ppo2, model_acer, nsteps=5, gamma=0.99):
         super().__init__(env=env, model=model, nsteps=nsteps)
         self.gamma = gamma
         nenv = self.nenv
@@ -27,9 +28,26 @@ class Runner(AbstractEnvRunner):
         self.ac_dtype = env.action_space.dtype
         self.q_exp = q_exp
         self.q_model = q_model
+        self.model_ppo2 = model_ppo2
+        self.model_acer = model_acer
         self.lam=0.95
 
     def run(self):
+        ppo2_param = None
+        while not self.q_model[1].empty():
+            ppo2_param = self.q_model[1].get()
+        if ppo2_param:
+            params = tf.trainable_variables("ppo2_model")
+            for i in range(len(params)):
+                params[i].assign(ppo2_param[i])
+        acer_param = None
+        while not self.q_model[2].empty():
+            acer_param = self.q_model[2].get()
+        if acer_param:
+            params = tf.trainable_variables("acer_model")
+            for i in range(len(params)-2):
+                params[i].assign(acer_param[i])
+
         # We initialize the lists that will contain the mb of experiences
         enc_obs = np.split(self.env.stackedobs, self.env.nstack, axis=-1)
         mb_obs, mb_obs_acer, mb_rewards, mb_actions, mb_values, mb_dones, mb_dones_ppo2, mb_mus, mb_neglogpacs = [], [], [], [], [],[],[],[],[]
@@ -69,24 +87,28 @@ class Runner(AbstractEnvRunner):
         mb_dones.append(self.dones)
 
         # Batch of steps to batch of rollouts
-        enc_obs = np.asarray(enc_obs, dtype=self.obs_dtype).swapaxes(1, 0)
-        mb_obs_acer = np.asarray(mb_obs_acer, dtype=self.obs_dtype).swapaxes(1, 0)
+        enc_obs = np.asarray(enc_obs[0:511], dtype=self.obs_dtype).swapaxes(1, 0)
+        mb_obs_acer = np.asarray(mb_obs, dtype=self.obs_dtype).swapaxes(1, 0)
         mb_obs_ppo2 = np.asarray(mb_obs, dtype=self.obs.dtype)
         mb_obs = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape)
-        mb_rewards_acer = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
+        mb_rewards_acer = np.asarray(mb_rewards[0:511], dtype=np.float32).swapaxes(1, 0)
+        #print("mb_rewards_acer shape: " + str(np.shape(mb_rewards_acer)))
+        #print("mb_rewards shape: " + str(np.shape(mb_rewards)))
         mb_rewards_ppo2 = np.asarray(mb_rewards, dtype=np.float32)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
-        mb_actions_acer = np.asarray(mb_actions, dtype=self.ac_dtype).swapaxes(1, 0)
+        mb_actions_acer = np.asarray(mb_actions[0:511], dtype=self.ac_dtype).swapaxes(1, 0)
         mb_actions_ppo2 = np.asarray(mb_actions)
         mb_actions = np.asarray(mb_actions, dtype=self.model.train_model.action.dtype.name).swapaxes(1, 0)
         mb_values_ppo2 = np.asarray(mb_values, dtype=np.float32)
         mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
-        mb_mus = np.asarray(mb_mus, dtype=np.float32).swapaxes(1, 0)
+        mb_mus = np.asarray(mb_mus[0:511], dtype=np.float32).swapaxes(1, 0)
 
         mb_dones_ppo2 = np.asarray(mb_dones_ppo2, dtype=np.bool)
+        mb_dones_acer = np.asarray(mb_dones_ppo2, dtype=np.bool).swapaxes(1, 0)
+        mb_masks_acer = mb_dones_acer
+        mb_dones_acer = mb_dones_acer[:, 1:]
         mb_dones = np.asarray(mb_dones, dtype=np.bool).swapaxes(1, 0)
-        mb_masks_acer = mb_dones
         mb_masks = mb_dones[:, :-1]
         mb_dones = mb_dones[:, 1:]
 
@@ -125,12 +147,18 @@ class Runner(AbstractEnvRunner):
             last_value = last_values.tolist()
             for n, (rewards, dones, value) in enumerate(zip(mb_rewards, mb_dones, last_value)):
                 rewards = rewards.tolist()
+                #print("rewards_tolist shape: " + str(len(rewards)))
                 dones = dones.tolist()
+                #print("dones_tolist shape: " + str(len(dones)))
                 if dones[-1] == 0:
+                    #print("here")
                     rewards = discount_with_dones(rewards+[value], dones+[0], self.gamma)[:-1]
                 else:
+                    #print("there")
                     rewards = discount_with_dones(rewards, dones, self.gamma)
 
+                #print("rewards shape: " + str(np.shape(rewards)))
+                #print("mb_rewards shape: " + str(np.shape(mb_rewards)))
                 mb_rewards[n] = rewards
 
         mb_actions = mb_actions.reshape(self.batch_action_shape)
@@ -140,7 +168,7 @@ class Runner(AbstractEnvRunner):
         mb_masks = mb_masks.flatten()
 
 
-        exp_acer = [enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones, mb_masks_acer]
+        exp_acer = [enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones_acer, mb_masks_acer]
 
         ll = list(map(sf01, (mb_obs_ppo2, mb_returns, mb_dones_ppo2, mb_actions_ppo2, mb_values_ppo2, mb_neglogpacs)))
         exp_ppo2 = [ll[0], ll[1], ll[2], ll[3], ll[4], ll[5], mb_states, epinfos]

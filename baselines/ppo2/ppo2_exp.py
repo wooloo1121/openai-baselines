@@ -2,7 +2,8 @@ import os
 import time
 import numpy as np
 import os.path as osp
-from baselines import logger
+from baselines.logger import configure
+#from baselines import logger
 from collections import deque
 from baselines.common import explained_variance, set_global_seeds
 from baselines.common.policies import build_policy
@@ -137,7 +138,7 @@ def build_env(args):
 
 def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=2048, ent_coef=0.0, lr=3e-4,
             vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
-            log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
+            log_interval=1, nminibatches=4, noptepochs=4, cliprange=0.2,
             save_interval=0, load_path=None, model_fn=None, update_fn=None, init_fn=None, mpi_rank_weight=1, comm=None):
     '''
     Learn policy using PPO algorithm (https://arxiv.org/abs/1707.06347)
@@ -193,6 +194,7 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
 
 
     '''
+    logger = configure(args.log_path)
 
     env = build_env(args)
     if args.save_video_interval != 0:
@@ -231,14 +233,19 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
         from baselines.ppo2.model import Model
         model_fn = Model
 
-    model = model_fn(policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
+    model = model_fn(model_type='ppo2_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
                     nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
                     max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight)
-
+    model_a2c = model_fn(model_type='a2c_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
+                    nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
+                    max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight)
+    model_acer = model_fn(model_type='acer_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
+                    nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
+                    max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight)
     if load_path is not None:
         model.load(load_path)
     # Instantiate the runner object
-    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam, q_exp=q_exp, q_model=q_model)
+    runner = Runner(env=env, model=model, nsteps=nsteps, gamma=gamma, lam=lam, q_exp=q_exp, q_model=q_model, model_a2c=model_a2c, model_acer=model_acer)
     if eval_env is not None:
         eval_runner = Runner(env = eval_env, model = model, nsteps = nsteps, gamma = gamma, lam = lam, EVAL=True)
 
@@ -264,7 +271,7 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
         # Calculate the cliprange
         cliprangenow = cliprange(frac)
 
-        if update % log_interval == 0 and is_mpi_root: logger.info('Stepping environment...')
+        if update % log_interval == 0 and is_mpi_root: logger.log('Stepping environment...', level=20)
 
         ret = runner.run()
         for i in range(len(ret)):
@@ -274,7 +281,7 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
             if eval_env is not None and i == 0:
                 eval_obs, eval_returns, eval_masks, eval_actions, eval_values, eval_neglogpacs, eval_states, eval_epinfos = eval_runner.run() #pylint: disable=E0632
 
-            if update % log_interval == 0 and is_mpi_root: logger.info('Done.')
+            if update % log_interval == 0 and is_mpi_root: logger.log('Done.', level=20)
 
             epinfobuf.extend(epinfos)
             if eval_env is not None and i == 0:
@@ -320,8 +327,12 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
                         mbstates = states[mbenvinds]
                         mblossvals.append(model.train(lrnow, cliprangenow, *slices, states=mbstates))
 
-        #params = tf.trainable_variables('ppo2_model')
-        #q_model[1].put(params)
+        params = tf.trainable_variables('ppo2_model')
+        #for var in params:
+        #    print(var.name)
+        param_val = model.sess.run(params)
+        q_model[1].put(param_val)
+
         # Feedforward --> get losses --> update
         lossvals = np.mean(mblossvals, axis=0)
         # End timer

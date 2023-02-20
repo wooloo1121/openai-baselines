@@ -397,6 +397,7 @@ def configure(dir=None, format_strs=None, comm=None, log_suffix=''):
     Logger.CURRENT = Logger(dir=dir, output_formats=output_formats, comm=comm)
     if output_formats:
         log('Logging to %s'%dir)
+    return Logger.CURRENT
 
 def _configure_default_logger():
     configure()

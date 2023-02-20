@@ -3,11 +3,12 @@ from baselines.common.runners import AbstractEnvRunner
 from baselines.common.vec_env.vec_frame_stack import VecFrameStack
 from gym import spaces
 from baselines.a2c.utils import discount_with_dones
+import tensorflow as tf
 
 
 class Runner(AbstractEnvRunner):
 
-    def __init__(self, env, model, nsteps, q_exp, q_model):
+    def __init__(self, env, model, nsteps, q_exp, q_model, model_a2c, model_ppo2):
         super().__init__(env=env, model=model, nsteps=nsteps)
         assert isinstance(env.action_space, spaces.Discrete), 'This ACER implementation works only with discrete action spaces!'
         assert isinstance(env, VecFrameStack)
@@ -33,13 +34,31 @@ class Runner(AbstractEnvRunner):
         self.gamma = 0.99
         self.lam=0.95
 
+        self.model_a2c = model_a2c
+        self.model_ppo2 = model_ppo2
+
     def run(self):
+        ppo2_param = None
+        while not self.q_model[1].empty():
+            ppo2_param = self.q_model[1].get()
+        if ppo2_param:
+            params = tf.trainable_variables("ppo2_model")
+            for i in range(len(params)):
+                params[i].assign(ppo2_param[i])
+        a2c_param = None
+        while not self.q_model[0].empty():
+            a2c_param = self.q_model[0].get()
+        if a2c_param:
+            params = tf.trainable_variables("a2c_model")
+            for i in range(len(params)):
+                params[i].assign(a2c_param[i])
+
         # enc_obs = np.split(self.obs, self.nstack, axis=3)  # so now list of obs steps
         enc_obs = np.split(self.env.stackedobs, self.env.nstack, axis=-1)
         mb_obs, mb_obs_acer, mb_actions, mb_mus, mb_dones, mb_dones_ppo2, mb_rewards, mb_values, mb_neglogpacs = [], [], [], [], [], [], [], [], []
         #mb_states = self.states
         epinfos = []
-        for _ in range(self.nsteps):
+        for _ in range(self.nsteps+1):
             #print("ACER self.obs: ")
             #print(np.shape(self.obs))
             actions, mus, states = self.model._step(self.obs, S=self.states, M=self.dones)
@@ -73,25 +92,26 @@ class Runner(AbstractEnvRunner):
         mb_obs_acer.append(np.copy(self.obs))
         mb_dones.append(self.dones)
 
-        enc_obs = np.asarray(enc_obs, dtype=self.obs_dtype).swapaxes(1, 0)
-        mb_obs_acer = np.asarray(mb_obs_acer, dtype=self.obs_dtype).swapaxes(1, 0)
+        enc_obs = np.asarray(enc_obs[0:511], dtype=self.obs_dtype).swapaxes(1, 0)
+        mb_obs_acer = np.asarray(mb_obs, dtype=self.obs_dtype).swapaxes(1, 0)
         mb_obs_ppo2 = np.asarray(mb_obs, dtype=self.obs.dtype)
-        mb_obs = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape)
-        mb_actions_acer = np.asarray(mb_actions, dtype=self.ac_dtype).swapaxes(1, 0)
+        mb_obs = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape_acer)
+        mb_actions_acer = np.asarray(mb_actions[0:511], dtype=self.ac_dtype).swapaxes(1, 0)
         mb_actions_ppo2 = np.asarray(mb_actions)
         mb_actions = np.asarray(mb_actions, dtype=self.model.train_model.action.dtype.name).swapaxes(1, 0)
-        mb_rewards_acer = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
+        mb_rewards_acer = np.asarray(mb_rewards[0:511], dtype=np.float32).swapaxes(1, 0)
         mb_rewards_ppo2 = np.asarray(mb_rewards, dtype=np.float32)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
-        mb_mus = np.asarray(mb_mus, dtype=np.float32).swapaxes(1, 0)
+        mb_mus = np.asarray(mb_mus[0:511], dtype=np.float32).swapaxes(1, 0)
         mb_values_ppo2 = np.asarray(mb_values, dtype=np.float32)
         mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
 
         mb_dones_ppo2 = np.asarray(mb_dones_ppo2, dtype=np.bool)
+        mb_dones_acer = np.asarray(mb_dones_ppo2, dtype=np.bool).swapaxes(1, 0)
+        mb_masks_acer = mb_dones_acer # Used for statefull models like LSTM's to mask state when done
+        mb_dones_acer = mb_dones_acer[:, 1:]
         mb_dones = np.asarray(mb_dones, dtype=np.bool).swapaxes(1, 0)
-
-        mb_masks_acer = mb_dones # Used for statefull models like LSTM's to mask state when done
         mb_masks = mb_dones[:, :-1]
         mb_dones = mb_dones[:, 1:] # Used for calculating returns. The dones array is now aligned with rewards
 
@@ -165,7 +185,7 @@ class Runner(AbstractEnvRunner):
         ret = []
         #print("mb_obs_acer shape before return: ")
         #print(np.shape(mb_obs_acer))
-        ret.append([enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones, mb_masks_acer])
+        ret.append([enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones_acer, mb_masks_acer])
 
         while not self.q_exp[2].empty():
             exp_acer = self.q_exp[2].get()

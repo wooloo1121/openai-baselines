@@ -2,7 +2,8 @@ import time
 import functools
 import tensorflow as tf
 
-from baselines import logger
+#from baselines import logger
+from baselines.logger import configure
 
 from baselines.common import set_global_seeds, explained_variance
 from baselines.common import tf_util
@@ -153,16 +154,17 @@ class Model(object):
         save/load():
         - Save load the model
     """
-    def __init__(self, policy, env, nsteps,
+    def __init__(self, model_type, policy, env, nsteps,
             ent_coef=0.01, vf_coef=0.5, max_grad_norm=0.5, lr=7e-4,
             alpha=0.99, epsilon=1e-5, total_timesteps=int(80e6), lrschedule='linear'):
 
         sess = tf_util.get_session()
+        self.sess = sess
         nenvs = env.num_envs
         nbatch = nenvs*nsteps
 
 
-        with tf.variable_scope('a2c_model', reuse=tf.AUTO_REUSE):
+        with tf.variable_scope(model_type, reuse=tf.AUTO_REUSE):
             # step_model is used for sampling
             step_model = policy(nenvs, 1, sess)
 
@@ -192,7 +194,7 @@ class Model(object):
 
         # Update parameters using loss
         # 1. Get the model parameters
-        params = find_trainable_variables("a2c_model")
+        params = find_trainable_variables(model_type)
 
         # 2. Calculate the gradients
         grads = tf.gradients(loss, params)
@@ -259,7 +261,7 @@ def learn(
     epsilon=1e-5,
     alpha=0.99,
     gamma=0.99,
-    log_interval=100,
+    log_interval=10,
     load_path=None):
 
     '''
@@ -308,6 +310,7 @@ def learn(
                         For instance, 'mlp' network architecture has arguments num_hidden and num_layers.
 
     '''
+    logger = configure(args.log_path)
 
     env = build_env(args)
     if args.save_video_interval != 0:
@@ -326,13 +329,18 @@ def learn(
     policy = build_policy(env, network)
 
     # Instantiate the model object (that creates step_model and train_model)
-    model = Model(policy=policy, env=env, nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
+    model = Model(model_type='a2c_model', policy=policy, env=env, nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
         max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps, lrschedule=lrschedule)
     if load_path is not None:
         model.load(load_path)
 
+    model_ppo2 = Model(model_type='ppo2_model', policy=policy, env=env, nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
+        max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps, lrschedule=lrschedule)
+    model_acer = Model(model_type='acer_model', policy=policy, env=env, nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
+        max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps, lrschedule=lrschedule)
+
     # Instantiate the runner object
-    runner = Runner(env, model, q_exp, q_model, nsteps=nsteps, gamma=gamma)
+    runner = Runner(env, model, q_exp, q_model, model_ppo2, model_acer, nsteps=nsteps, gamma=gamma)
     epinfobuf = deque(maxlen=100)
 
     # Calculate the batch_size
@@ -351,8 +359,13 @@ def learn(
                 epinfobuf.extend(epinfos)
             #print("a2c train i: " + str(i))
             policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
-        #params = find_trainable_variables("a2c_model")
-        #q_model[0].put(params)
+
+        params = find_trainable_variables("a2c_model")
+        #for var in params:
+        #    print(var.name)
+        param_val = model.sess.run(params)
+        q_model[0].put(param_val)
+
         nseconds = time.time()-tstart
 
         # Calculate the fps (frame per second)
@@ -361,14 +374,14 @@ def learn(
             # Calculates if value function is a good predicator of the returns (ev > 1)
             # or if it's just worse than predicting nothing (ev =< 0)
             ev = explained_variance(values, rewards)
-            logger.record_tabular("nupdates", update)
-            logger.record_tabular("total_timesteps", update*nbatch)
-            logger.record_tabular("fps", fps)
-            logger.record_tabular("policy_entropy", float(policy_entropy))
-            logger.record_tabular("value_loss", float(value_loss))
-            logger.record_tabular("explained_variance", float(ev))
-            logger.record_tabular("eprewmean", safemean([epinfo['r'] for epinfo in epinfobuf]))
-            logger.record_tabular("eplenmean", safemean([epinfo['l'] for epinfo in epinfobuf]))
-            logger.dump_tabular()
+            logger.logkv("nupdates", update)
+            logger.logkv("total_timesteps", update*nbatch)
+            logger.logkv("fps", fps)
+            logger.logkv("policy_entropy", float(policy_entropy))
+            logger.logkv("value_loss", float(value_loss))
+            logger.logkv("explained_variance", float(ev))
+            logger.logkv("eprewmean", safemean([epinfo['r'] for epinfo in epinfobuf]))
+            logger.logkv("eplenmean", safemean([epinfo['l'] for epinfo in epinfobuf]))
+            logger.dumpkvs()
     return model
 

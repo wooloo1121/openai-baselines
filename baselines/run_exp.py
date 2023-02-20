@@ -229,12 +229,12 @@ def main(args):
     args, unknown_args = arg_parser.parse_known_args(args)
     extra_args = parse_cmdline_kwargs(unknown_args)
 
-    if MPI is None or MPI.COMM_WORLD.Get_rank() == 0:
+    #if MPI is None or MPI.COMM_WORLD.Get_rank() == 0:
     #    rank = 0
-        configure_logger(args.log_path)
-    else:
+    #    configure_logger(args.log_path)
+    #else:
     #    rank = MPI.COMM_WORLD.Get_rank()
-        configure_logger(args.log_path, format_strs=[])
+    #    configure_logger(args.log_path, format_strs=[])
 
     #model, env = train(args, extra_args)
     train(args, extra_args)
