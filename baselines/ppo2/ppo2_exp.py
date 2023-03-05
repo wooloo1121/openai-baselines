@@ -138,7 +138,7 @@ def build_env(args):
 
 def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=2048, ent_coef=0.0, lr=3e-4,
             vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
-            log_interval=1, nminibatches=4, noptepochs=4, cliprange=0.2,
+            log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
             save_interval=0, load_path=None, model_fn=None, update_fn=None, init_fn=None, mpi_rank_weight=1, comm=None):
     '''
     Learn policy using PPO algorithm (https://arxiv.org/abs/1707.06347)
@@ -236,10 +236,10 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
     model = model_fn(model_type='ppo2_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
                     nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
                     max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight)
-    model_a2c = model_fn(model_type='a2c_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
+    model_a2c = model_fn(model_type='a2c_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=20,
                     nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
                     max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight)
-    model_acer = model_fn(model_type='acer_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=nbatch_train,
+    model_acer = model_fn(model_type='acer_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nbatch_act=nenvs, nbatch_train=84,
                     nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
                     max_grad_norm=max_grad_norm, comm=comm, mpi_rank_weight=mpi_rank_weight)
     if load_path is not None:
@@ -327,11 +327,13 @@ def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=204
                         mbstates = states[mbenvinds]
                         mblossvals.append(model.train(lrnow, cliprangenow, *slices, states=mbstates))
 
+
         params = tf.trainable_variables('ppo2_model')
         #for var in params:
-        #    print(var.name)
+        #    print(var)
         param_val = model.sess.run(params)
         q_model[1].put(param_val)
+
 
         # Feedforward --> get losses --> update
         lossvals = np.mean(mblossvals, axis=0)

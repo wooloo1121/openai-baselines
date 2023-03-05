@@ -271,4 +271,5 @@ def main(args):
     return #model
 
 if __name__ == '__main__':
+    #tf.compat.v1.enable_eager_execution()
     main(sys.argv)

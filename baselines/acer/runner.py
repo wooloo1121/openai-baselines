@@ -4,7 +4,10 @@ from baselines.common.vec_env.vec_frame_stack import VecFrameStack
 from gym import spaces
 from baselines.a2c.utils import discount_with_dones
 import tensorflow as tf
+import sys
 
+#tf.compat.v1.enable_eager_execution()
+#tf.compat.v1.disable_v2_behavior()
 
 class Runner(AbstractEnvRunner):
 
@@ -33,36 +36,100 @@ class Runner(AbstractEnvRunner):
 
         self.gamma = 0.99
         self.lam=0.95
+        self.models = [model_a2c, model_ppo2, model]
 
-        self.model_a2c = model_a2c
-        self.model_ppo2 = model_ppo2
+        #self.model_a2c = model_a2c
+        #self.model_ppo2 = model_ppo2
 
     def run(self):
+
         ppo2_param = None
         while not self.q_model[1].empty():
             ppo2_param = self.q_model[1].get()
         if ppo2_param:
+            #print("ppo2_param received: ")
+            #print(ppo2_param)
             params = tf.trainable_variables("ppo2_model")
+            #print("params current ppo2 model: ")
+            #print(params)
             for i in range(len(params)):
-                params[i].assign(ppo2_param[i])
+                #params[i].assign(ppo2_param[i])
+                update = tf.assign(params[i],ppo2_param[i])
+                self.models[1].sess.run(update)
+                #print("params " + str(i) + " :")
+                #print(self.models[1].sess.run(params[i]))
+            #print("params ppo2 model after assign: ")
+            #print(params)
         a2c_param = None
         while not self.q_model[0].empty():
             a2c_param = self.q_model[0].get()
         if a2c_param:
+            #print("a2c_param received: ")
+            #print(a2c_param)
             params = tf.trainable_variables("a2c_model")
+            #print("params current a2c model: ")
+            #print(params)
             for i in range(len(params)):
-                params[i].assign(a2c_param[i])
+                #params[i].assign(a2c_param[i])
+                update = tf.assign(params[i],a2c_param[i])
+                self.models[0].sess.run(update)
+                #print("params " + str(i) + " :")
+                #print(self.models[0].sess.run(params[i]))
+                #tf.Print(params[i], [params[i]])
+            #print("params a2c model after assign: ")
+            #print(params)
+
 
         # enc_obs = np.split(self.obs, self.nstack, axis=3)  # so now list of obs steps
         enc_obs = np.split(self.env.stackedobs, self.env.nstack, axis=-1)
         mb_obs, mb_obs_acer, mb_actions, mb_mus, mb_dones, mb_dones_ppo2, mb_rewards, mb_values, mb_neglogpacs = [], [], [], [], [], [], [], [], []
         #mb_states = self.states
         epinfos = []
-        for _ in range(self.nsteps+1):
+        count = [0,0,0]
+        for _ in range(self.nsteps):#+1):
             #print("ACER self.obs: ")
             #print(np.shape(self.obs))
-            actions, mus, states = self.model._step(self.obs, S=self.states, M=self.dones)
-            _, values, _, neglogpacs = self.model.step(self.obs, S=self.states, M=self.dones)
+
+            action_list = []
+            value_list = []
+            state_list = []
+            likelihood_list = []
+            mus_list = []
+            for k in range(3):
+                _, tmp1, _, tmp3 = self.models[k].step(self.obs, S=self.states, M=self.dones)
+                tmp0, tmp4, tmp2 = self.models[k]._step(self.obs, S=self.states, M=self.dones)
+                action_list.append(tmp0)
+                value_list.append(tmp1)
+                state_list.append(tmp2)
+                likelihood_list.append(tmp3)
+                mus_list.append(tmp4)
+            #print("acer action_list: ")
+            #print(action_list)
+            #print("acer likelihood_list: ")
+            #print(likelihood_list)
+            for k in range(4):
+                temp = [likelihood_list[0][k],likelihood_list[1][k],likelihood_list[2][k]]
+                index = temp.index(max(temp))
+                count[index] += 1
+                action_list[0][k] = action_list[index][k]
+                value_list[0][k] = value_list[index][k]
+                #state_list[0][k] = state_list[index][k]
+                likelihood_list[0][k] = likelihood_list[index][k]
+                mus_list[0][k] = mus_list[index][k]
+            #print("acer action_list after get max: ")
+            #print(action_list)
+            #print("acer likelihood_list after get max: ")
+            #print(likelihood_list)
+
+            actions = action_list[0]
+            values = value_list[0]
+            states = state_list[0]
+            neglogpacs = likelihood_list[0]
+            mus = mus_list[0]
+
+
+            #actions, mus, states = self.model._step(self.obs, S=self.states, M=self.dones)
+            #_, values, _, neglogpacs = self.model.step(self.obs, S=self.states, M=self.dones)
             #print("acer step values: " + str(values))
             mb_obs.append(np.copy(self.obs))
             mb_obs_acer.append(np.copy(self.obs))
@@ -92,23 +159,59 @@ class Runner(AbstractEnvRunner):
         mb_obs_acer.append(np.copy(self.obs))
         mb_dones.append(self.dones)
 
-        enc_obs = np.asarray(enc_obs[0:511], dtype=self.obs_dtype).swapaxes(1, 0)
-        mb_obs_acer = np.asarray(mb_obs, dtype=self.obs_dtype).swapaxes(1, 0)
+
+        agent = count.index(max(count))
+        if agent != 2:
+            params = tf.trainable_variables("acer_model")
+            #print("acer_model: ")
+            #print(params)
+            if agent == 1 and ppo2_param:
+                #print("ppo2_param received: ")
+                #print(ppo2_param)
+                for i in range(len(params)-2):
+                    #params[i].assign(ppo2_param[i])
+                    update = tf.assign(params[i],ppo2_param[i])
+                    self.model.sess.run(update)
+                    #print("params " + str(i) + " :")
+                    #tf.Print(params[i], [params[i]])
+                #print("acer_model after assign: ")
+                #print(params)
+            if agent == 0 and a2c_param:
+                #print("a2c_model received: ")
+                #print(a2c_param)
+                for i in range(len(params)-2):
+                    #params[i].assign(a2c_param[i])
+                    update = tf.assign(params[i],a2c_param[i])
+                    self.model.sess.run(update)
+                    #print("params " + str(i) + " :")
+                    #tf.print(params[i], [params[i]])
+                #print("acer_model after assign: ")
+                #print(params)
+
+
+        enc_obs = np.asarray(enc_obs, dtype=self.obs_dtype).swapaxes(1, 0)
+        #enc_obs = np.asarray(enc_obs[0:511], dtype=self.obs_dtype).swapaxes(1, 0)
+        mb_obs_acer = np.asarray(mb_obs_acer, dtype=self.obs_dtype).swapaxes(1, 0)
+        #mb_obs_acer = np.asarray(mb_obs, dtype=self.obs_dtype).swapaxes(1, 0)
         mb_obs_ppo2 = np.asarray(mb_obs, dtype=self.obs.dtype)
-        mb_obs = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape_acer)
-        mb_actions_acer = np.asarray(mb_actions[0:511], dtype=self.ac_dtype).swapaxes(1, 0)
+        #mb_obs = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape_acer)
+        mb_actions_acer = np.asarray(mb_actions, dtype=self.ac_dtype).swapaxes(1, 0)
+        #mb_actions_acer = np.asarray(mb_actions[0:511], dtype=self.ac_dtype).swapaxes(1, 0)
         mb_actions_ppo2 = np.asarray(mb_actions)
         mb_actions = np.asarray(mb_actions, dtype=self.model.train_model.action.dtype.name).swapaxes(1, 0)
-        mb_rewards_acer = np.asarray(mb_rewards[0:511], dtype=np.float32).swapaxes(1, 0)
+        mb_rewards_acer = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
+        #mb_rewards_acer = np.asarray(mb_rewards[0:511], dtype=np.float32).swapaxes(1, 0)
         mb_rewards_ppo2 = np.asarray(mb_rewards, dtype=np.float32)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
-        mb_mus = np.asarray(mb_mus[0:511], dtype=np.float32).swapaxes(1, 0)
+        mb_mus = np.asarray(mb_mus, dtype=np.float32).swapaxes(1, 0)
+        #mb_mus = np.asarray(mb_mus[0:511], dtype=np.float32).swapaxes(1, 0)
         mb_values_ppo2 = np.asarray(mb_values, dtype=np.float32)
         mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
 
         mb_dones_ppo2 = np.asarray(mb_dones_ppo2, dtype=np.bool)
-        mb_dones_acer = np.asarray(mb_dones_ppo2, dtype=np.bool).swapaxes(1, 0)
+        mb_dones_acer = np.asarray(mb_dones, dtype=np.bool).swapaxes(1, 0)
+        #mb_dones_acer = np.asarray(mb_dones_ppo2, dtype=np.bool).swapaxes(1, 0)
         mb_masks_acer = mb_dones_acer # Used for statefull models like LSTM's to mask state when done
         mb_dones_acer = mb_dones_acer[:, 1:]
         mb_dones = np.asarray(mb_dones, dtype=np.bool).swapaxes(1, 0)
@@ -174,22 +277,22 @@ class Runner(AbstractEnvRunner):
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
         mb_returns = mb_advs + mb_values_ppo2
 
-        exp_a2c = [mb_obs, None, mb_rewards.flatten(), mb_masks.flatten(), mb_actions.reshape(self.batch_action_shape), mb_values.flatten(), epinfos]
+        #exp_a2c = [mb_obs, None, mb_rewards.flatten(), mb_masks.flatten(), mb_actions.reshape(self.batch_action_shape), mb_values.flatten(), epinfos]
 
-        ll = list(map(sf01, (mb_obs_ppo2, mb_returns, mb_dones_ppo2, mb_actions_ppo2, mb_values_ppo2, mb_neglogpacs)))
-        exp_ppo2 = [ll[0], ll[1], ll[2], ll[3], ll[4], ll[5], None, epinfos]
+        #ll = list(map(sf01, (mb_obs_ppo2, mb_returns, mb_dones_ppo2, mb_actions_ppo2, mb_values_ppo2, mb_neglogpacs)))
+        #exp_ppo2 = [ll[0], ll[1], ll[2], ll[3], ll[4], ll[5], None, epinfos]
 
-        self.q_exp[0].put(exp_a2c)
-        self.q_exp[1].put(exp_ppo2)
+        #self.q_exp[0].put(exp_a2c)
+        #self.q_exp[1].put(exp_ppo2)
 
         ret = []
         #print("mb_obs_acer shape before return: ")
         #print(np.shape(mb_obs_acer))
         ret.append([enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones_acer, mb_masks_acer])
 
-        while not self.q_exp[2].empty():
-            exp_acer = self.q_exp[2].get()
-            ret.append(exp_acer)
+        #while not self.q_exp[2].empty():
+        #    exp_acer = self.q_exp[2].get()
+        #    ret.append(exp_acer)
 
         # shapes are now [nenv, nsteps, []]
         # When pulling from buffer, arrays will now be reshaped in place, preventing a deep copy.

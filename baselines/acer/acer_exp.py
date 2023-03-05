@@ -427,11 +427,14 @@ class Acer():
 
                 names_ops, values_ops = model.train(obs, actions, rewards, dones, mus, model.initial_state, masks, steps)
 
+
         params = find_trainable_variables("acer_model")
         #for var in params:
-        #    print(var.name)
+        #    print(var)
         param_val = self.model.sess.run(params)
+        #param_val = self.model.get_weights()
         self.q_model[2].put(param_val)
+
 
         print("acer update: " + str(int(steps/runner.nbatch)))
         if on_policy and (int(steps/runner.nbatch) % self.log_interval == 0):
@@ -447,9 +450,10 @@ class Acer():
             self.logger.dumpkvs()
 
 
-def learn(args, extra_args, q_exp, q_model, network, nsteps=511, q_coef=0.5, ent_coef=0.01,
+def learn(args, extra_args, q_exp, q_model, network, nsteps=20,#511,
+          q_coef=0.5, ent_coef=0.01,
           max_grad_norm=10, lr=7e-4, lrschedule='linear', rprop_epsilon=1e-5, rprop_alpha=0.99, gamma=0.99,
-          log_interval=10, buffer_size=50000, replay_ratio=4, replay_start=10000, c=10.0,
+          log_interval=100, buffer_size=50000, replay_ratio=4, replay_start=10000, c=10.0,
           trust_region=True, alpha=0.99, delta=1, load_path=None):
 
     '''
@@ -545,12 +549,12 @@ def learn(args, extra_args, q_exp, q_model, network, nsteps=511, q_coef=0.5, ent
                   max_grad_norm=max_grad_norm, lr=lr, rprop_alpha=rprop_alpha, rprop_epsilon=rprop_epsilon,
                   total_timesteps=total_timesteps, lrschedule=lrschedule, c=c,
                   trust_region=trust_region, alpha=alpha, delta=delta)
-    model_a2c = Model(model_type='a2c_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs, nsteps=nsteps,
+    model_a2c = Model(model_type='a2c_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs, nsteps=4,
                   ent_coef=ent_coef, q_coef=q_coef, gamma=gamma,
                   max_grad_norm=max_grad_norm, lr=lr, rprop_alpha=rprop_alpha, rprop_epsilon=rprop_epsilon,
                   total_timesteps=total_timesteps, lrschedule=lrschedule, c=c,
                   trust_region=trust_region, alpha=alpha, delta=delta)
-    model_ppo2 = Model(model_type='ppo2_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs, nsteps=nsteps,
+    model_ppo2 = Model(model_type='ppo2_model', policy=policy, ob_space=ob_space, ac_space=ac_space, nenvs=nenvs, nsteps=511,
                   ent_coef=ent_coef, q_coef=q_coef, gamma=gamma,
                   max_grad_norm=max_grad_norm, lr=lr, rprop_alpha=rprop_alpha, rprop_epsilon=rprop_epsilon,
                   total_timesteps=total_timesteps, lrschedule=lrschedule, c=c,

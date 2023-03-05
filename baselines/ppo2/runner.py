@@ -33,22 +33,29 @@ class Runner(AbstractEnvRunner):
         self.nstack = self.env.nstack
         self.batch_ob_shape_acer = (nenv*(nsteps+1),) + env.observation_space.shape
         self.nc = self.batch_ob_shape_acer[-1] // self.nstack
+        self.models = [model_a2c, model, model_acer]
 
     def run(self):
+
         a2c_param = None
         while not self.q_model[0].empty():
             a2c_param = self.q_model[0].get()
         if a2c_param:
             params = tf.trainable_variables("a2c_model")
             for i in range(len(params)):
-                params[i].assign(a2c_param[i])
+                #params[i].assign(a2c_param[i])
+                update = tf.assign(params[i],a2c_param[i])
+                self.models[0].sess.run(update)
         acer_param = None
         while not self.q_model[2].empty():
             acer_param = self.q_model[2].get()
         if acer_param:
             params = tf.trainable_variables("acer_model")
             for i in range(len(params)-2):
-                params[i].assign(acer_param[i])
+                #params[i].assign(acer_param[i])
+                update = tf.assign(params[i],acer_param[i])
+                self.models[2].sess.run(update)
+
 
         # Here, we init the lists that will contain the mb of experiences
         enc_obs = np.split(self.env.stackedobs, self.env.nstack, axis=-1)
@@ -56,13 +63,48 @@ class Runner(AbstractEnvRunner):
         mb_states = self.states
         epinfos = []
         # For n in range number of steps
+        count = [0,0,0]
         for _ in range(self.nsteps):
             #print("PPO2 self.obs: ")
             #print(np.shape(self.obs))
             # Given observations, get action value and neglopacs
             # We already have self.obs because Runner superclass run self.obs[:] = env.reset() on init
-            _, mus, _ = self.model._step(self.obs, S=self.states, M=self.dones)
-            actions, values, self.states, neglogpacs = self.model.step(self.obs, S=self.states, M=self.dones)
+
+            action_list = []
+            value_list = []
+            state_list = []
+            likelihood_list = []
+            mus_list = []
+            for k in range(3):
+                tmp0, tmp1, tmp2, tmp3 = self.models[k].step(self.obs, S=self.states, M=self.dones)
+                _, tmp4, _ = self.models[k]._step(self.obs, S=self.states, M=self.dones)
+                action_list.append(tmp0)
+                value_list.append(tmp1)
+                state_list.append(tmp2)
+                likelihood_list.append(tmp3)
+                mus_list.append(tmp4)
+            for k in range(4):
+                temp = [likelihood_list[0][k],likelihood_list[1][k],likelihood_list[2][k]]
+                index = temp.index(max(temp))
+                count[index] += 1
+                action_list[0][k] = action_list[index][k]
+                value_list[0][k] = value_list[index][k]
+                #state_list[0][k] = state_list[index][k]
+                likelihood_list[0][k] = likelihood_list[index][k]
+                mus_list[0][k] = mus_list[index][k]
+
+            #actions, values, states, neglogpacs = self.models[index].step(self.obs, S=self.states, M=self.dones)
+            #_, mus, _ = self.models[index]._step(self.obs, S=self.states, M=self.dones)
+
+            actions = action_list[0]
+            values = value_list[0]
+            self.states = state_list[0]
+            neglogpacs = likelihood_list[0]
+            mus = mus_list[0]
+
+
+            #_, mus, _ = self.model._step(self.obs, S=self.states, M=self.dones)
+            #actions, values, self.states, neglogpacs = self.model.step(self.obs, S=self.states, M=self.dones)
             mb_obs.append(self.obs.copy())
             mb_obs_acer.append(np.copy(self.obs))
             mb_actions.append(actions)
@@ -109,6 +151,22 @@ class Runner(AbstractEnvRunner):
 
         #print("ppo2 self.obs shape at last_values: ")
         #print(np.shape(self.obs))
+
+
+        agent = count.index(max(count))
+        if agent != 1:
+            params = tf.trainable_variables("ppo2_model")
+            if agent == 0 and a2c_param:
+                for i in range(len(params)):
+                    #params[i].assign(a2c_param[i])
+                    update = tf.assign(params[i],a2c_param[i])
+                    self.model.sess.run(update)
+            if agent == 2 and acer_param:
+                for i in range(len(params)-2):
+                    #params[i].assign(acer_param[i])
+                    update = tf.assign(params[i],acer_param[i])
+                    self.model.sess.run(update)
+
 
         last_values = self.model.value(self.obs, S=self.states, M=self.dones)
         #print("ppo2 last_values shape: ")
@@ -175,19 +233,19 @@ class Runner(AbstractEnvRunner):
                 else:
                     exp_a2c.append(None)
 
-                self.q_exp[0].put(exp_a2c)
+                #self.q_exp[0].put(exp_a2c)
 
             exp_acer = [enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones_acer, mb_masks]
-            self.q_exp[2].put(exp_acer)
+            #self.q_exp[2].put(exp_acer)
 
             ret = []
             ret.append([*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)), mb_states, epinfos])
             #print("ppo2 mb_actions shape: ")
             #print(np.shape(ret[0][3]))
 
-            while not self.q_exp[1].empty():
-                exp_ppo2 = self.q_exp[1].get()
-                ret.append(exp_ppo2)
+            #while not self.q_exp[1].empty():
+            #    exp_ppo2 = self.q_exp[1].get()
+            #    ret.append(exp_ppo2)
 
         #return (*map(sf01, (mb_obs, mb_returns, mb_dones, mb_actions, mb_values, mb_neglogpacs)),
         #    mb_states, epinfos)

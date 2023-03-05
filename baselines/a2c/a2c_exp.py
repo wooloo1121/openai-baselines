@@ -252,7 +252,7 @@ def learn(
     q_exp,
     q_model,
     network,
-    nsteps=512,
+    nsteps=5,#12,
     vf_coef=0.5,
     ent_coef=0.01,
     max_grad_norm=0.5,
@@ -261,7 +261,7 @@ def learn(
     epsilon=1e-5,
     alpha=0.99,
     gamma=0.99,
-    log_interval=10,
+    log_interval=100,
     load_path=None):
 
     '''
@@ -334,9 +334,9 @@ def learn(
     if load_path is not None:
         model.load(load_path)
 
-    model_ppo2 = Model(model_type='ppo2_model', policy=policy, env=env, nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
+    model_ppo2 = Model(model_type='ppo2_model', policy=policy, env=env, nsteps=512, ent_coef=ent_coef, vf_coef=vf_coef,
         max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps, lrschedule=lrschedule)
-    model_acer = Model(model_type='acer_model', policy=policy, env=env, nsteps=nsteps, ent_coef=ent_coef, vf_coef=vf_coef,
+    model_acer = Model(model_type='acer_model', policy=policy, env=env, nsteps=21, ent_coef=ent_coef, vf_coef=vf_coef,
         max_grad_norm=max_grad_norm, lr=lr, alpha=alpha, epsilon=epsilon, total_timesteps=total_timesteps, lrschedule=lrschedule)
 
     # Instantiate the runner object
@@ -360,11 +360,13 @@ def learn(
             #print("a2c train i: " + str(i))
             policy_loss, value_loss, policy_entropy = model.train(obs, states, rewards, masks, actions, values)
 
+
         params = find_trainable_variables("a2c_model")
         #for var in params:
-        #    print(var.name)
+        #    print(var)
         param_val = model.sess.run(params)
         q_model[0].put(param_val)
+
 
         nseconds = time.time()-tstart
 
