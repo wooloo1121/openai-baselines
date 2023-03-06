@@ -98,7 +98,7 @@ class Runner(AbstractEnvRunner):
                 mus_list.append(tmp4)
             for k in range(4):
                 temp = [likelihood_list[0][k],likelihood_list[1][k],likelihood_list[2][k]]
-                index = temp.index(max(temp))
+                index = temp.index(min(temp))
                 count[index] += 1
                 action_list[0][k] = action_list[index][k]
                 value_list[0][k] = value_list[index][k]
@@ -145,7 +145,7 @@ class Runner(AbstractEnvRunner):
 
 
         agent = count.index(max(count))
-        if agent != 0:
+        if agent != 0 and max(count) > 15:
             params = tf.trainable_variables("a2c_model")
             #print("a2c_model: ")
             #print(params)
