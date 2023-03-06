@@ -2,6 +2,7 @@ import numpy as np
 from baselines.a2c.utils import discount_with_dones
 from baselines.common.runners import AbstractEnvRunner
 import tensorflow as tf
+import math
 
 #tf.compat.v1.enable_eager_execution()
 
@@ -101,10 +102,11 @@ class Runner(AbstractEnvRunner):
                 index = temp.index(min(temp))
                 count[index] += 1
                 action_list[0][k] = action_list[index][k]
-                value_list[0][k] = value_list[index][k]
+                #value_list[0][k] = value_list[index][k]
                 #state_list[0][k] = state_list[index][k]
-                likelihood_list[0][k] = likelihood_list[index][k]
-                mus_list[0][k] = mus_list[index][k]
+                #likelihood_list[0][k] = likelihood_list[index][k]
+                #mus_list[0][k] = mus_list[index][k]
+                likelihood_list[0][k] = -1 * math.log(mus_list[0][k][action_list[0][k]])
 
 
             #actions, values, states, neglogpacs = self.model.step(self.obs, S=self.states, M=self.dones)

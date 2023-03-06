@@ -5,6 +5,7 @@ from gym import spaces
 from baselines.a2c.utils import discount_with_dones
 import tensorflow as tf
 import sys
+import math
 
 #tf.compat.v1.enable_eager_execution()
 #tf.compat.v1.disable_v2_behavior()
@@ -112,20 +113,21 @@ class Runner(AbstractEnvRunner):
                 index = temp.index(min(temp))
                 count[index] += 1
                 action_list[0][k] = action_list[index][k]
-                value_list[0][k] = value_list[index][k]
+                #value_list[0][k] = value_list[index][k]
                 #state_list[0][k] = state_list[index][k]
-                likelihood_list[0][k] = likelihood_list[index][k]
-                mus_list[0][k] = mus_list[index][k]
+                #likelihood_list[0][k] = likelihood_list[index][k]
+                #mus_list[0][k] = mus_list[index][k]
+                likelihood_list[0][k] = -1 * math.log(mus_list[2][k][action_list[0][k]])
             #print("acer action_list after get max: ")
             #print(action_list)
             #print("acer likelihood_list after get max: ")
             #print(likelihood_list)
 
             actions = action_list[0]
-            values = value_list[0]
+            values = value_list[2]
             states = state_list[0]
             neglogpacs = likelihood_list[0]
-            mus = mus_list[0]
+            mus = mus_list[2]
 
 
             #actions, mus, states = self.model._step(self.obs, S=self.states, M=self.dones)

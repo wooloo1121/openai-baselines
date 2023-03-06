@@ -2,6 +2,7 @@ import numpy as np
 from baselines.common.runners import AbstractEnvRunner
 from baselines.a2c.utils import discount_with_dones
 import tensorflow as tf
+import math
 
 class Runner(AbstractEnvRunner):
     """
@@ -88,19 +89,22 @@ class Runner(AbstractEnvRunner):
                 index = temp.index(min(temp))
                 count[index] += 1
                 action_list[0][k] = action_list[index][k]
-                value_list[0][k] = value_list[index][k]
+                #print("selected action: ")
+                #print(action_list[0][k])
+                #value_list[0][k] = value_list[index][k]
                 #state_list[0][k] = state_list[index][k]
-                likelihood_list[0][k] = likelihood_list[index][k]
-                mus_list[0][k] = mus_list[index][k]
+                #likelihood_list[0][k] = likelihood_list[index][k]
+                #mus_list[0][k] = mus_list[index][k]
+                likelihood_list[0][k] = -1 * math.log(mus_list[1][k][action_list[0][k]])
 
             #actions, values, states, neglogpacs = self.models[index].step(self.obs, S=self.states, M=self.dones)
             #_, mus, _ = self.models[index]._step(self.obs, S=self.states, M=self.dones)
 
             actions = action_list[0]
-            values = value_list[0]
+            values = value_list[1]
             self.states = state_list[0]
             neglogpacs = likelihood_list[0]
-            mus = mus_list[0]
+            mus = mus_list[1]
 
 
             #_, mus, _ = self.model._step(self.obs, S=self.states, M=self.dones)
