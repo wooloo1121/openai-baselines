@@ -38,6 +38,7 @@ class Runner(AbstractEnvRunner):
         #self.model_ppo2 = model_ppo2
         #self.model_acer = model_acer
         self.lam=0.95
+        self.nact = self.env.action_space.n
 
     def run(self):
 
@@ -74,7 +75,7 @@ class Runner(AbstractEnvRunner):
 
         # We initialize the lists that will contain the mb of experiences
         enc_obs = np.split(self.env.stackedobs, self.env.nstack, axis=-1)
-        mb_obs, mb_obs_acer, mb_rewards, mb_actions, mb_values, mb_dones, mb_dones_ppo2, mb_mus, mb_neglogpacs = [], [], [], [], [],[],[],[],[]
+        mb_obs, mb_obs_acer, mb_rewards, mb_actions, mb_values, mb_values_ppo2, mb_dones, mb_dones_ppo2, mb_mus, mb_neglogpacs = [], [], [], [], [], [],[],[],[],[]
         mb_states = self.states
         epinfos = []
         #print("A2C self.obs: ")
@@ -99,7 +100,11 @@ class Runner(AbstractEnvRunner):
                 mus_list.append(tmp4)
             for k in range(4):
                 temp = [likelihood_list[0][k],likelihood_list[1][k],likelihood_list[2][k]]
-                index = temp.index(min(temp))
+                temp_min = min(temp)
+                index = 0
+                threshold = -1 * math.log(1/self.nact) / 2
+                if temp_min < threshold:
+                    index = temp.index(temp_min)
                 count[index] += 1
                 action_list[0][k] = action_list[index][k]
                 #value_list[0][k] = value_list[index][k]
@@ -115,6 +120,7 @@ class Runner(AbstractEnvRunner):
 
             actions = action_list[0]
             values = value_list[0]
+            values_ppo2 = value_list[1]
             states = state_list[0]
             neglogpacs = likelihood_list[0]
             mus = mus_list[0]
@@ -125,6 +131,7 @@ class Runner(AbstractEnvRunner):
             mb_obs_acer.append(np.copy(self.obs))
             mb_actions.append(actions)
             mb_values.append(values)
+            mb_values_ppo2.append(values_ppo2)
             mb_mus.append(mus)
             mb_dones.append(self.dones)
             mb_dones_ppo2.append(self.dones)
@@ -145,7 +152,7 @@ class Runner(AbstractEnvRunner):
         mb_obs_acer.append(np.copy(self.obs))
         mb_dones.append(self.dones)
 
-
+        mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
         agent = count.index(max(count))
         if agent != 0 and max(count) > 15:
             params = tf.trainable_variables("a2c_model")
@@ -162,6 +169,7 @@ class Runner(AbstractEnvRunner):
                     #print(params[i].numpy())
                 #print("a2c_model after assign: ")
                 #print(params)
+                mb_values = np.asarray(mb_values_ppo2, dtype=np.float32).swapaxes(1, 0)
             if agent == 2 and acer_param:
                 #print("acer_model received: ")
                 #print(acer_param)
@@ -188,8 +196,8 @@ class Runner(AbstractEnvRunner):
         mb_actions_acer = np.asarray(mb_actions[0:511], dtype=self.ac_dtype).swapaxes(1, 0)
         mb_actions_ppo2 = np.asarray(mb_actions)
         mb_actions = np.asarray(mb_actions, dtype=self.model.train_model.action.dtype.name).swapaxes(1, 0)
-        mb_values_ppo2 = np.asarray(mb_values, dtype=np.float32)
-        mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
+        #mb_values_ppo2 = np.asarray(mb_values, dtype=np.float32)
+        #mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
         mb_mus = np.asarray(mb_mus[0:511], dtype=np.float32).swapaxes(1, 0)
 
@@ -216,7 +224,7 @@ class Runner(AbstractEnvRunner):
         #print(np.shape(mb_actions_acer))
         #print("a2c mb_actions_ppo2 size: ")
         #print(np.shape(mb_actions_ppo2))
-
+        """
         mb_returns = np.zeros_like(mb_rewards_ppo2)
         mb_advs = np.zeros_like(mb_rewards_ppo2)
         lastgaelam = 0
@@ -230,6 +238,7 @@ class Runner(AbstractEnvRunner):
             delta = mb_rewards_ppo2[t] + self.gamma * nextvalues * nextnonterminal - mb_values_ppo2[t]
             mb_advs[t] = lastgaelam = delta + self.gamma * self.lam * nextnonterminal * lastgaelam
         mb_returns = mb_advs + mb_values_ppo2
+        """
 
         if self.gamma > 0.0:
             # Discount/bootstrap off value fn
@@ -257,10 +266,10 @@ class Runner(AbstractEnvRunner):
         mb_masks = mb_masks.flatten()
 
 
-        exp_acer = [enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones_acer, mb_masks_acer]
+        #exp_acer = [enc_obs, mb_obs_acer, mb_actions_acer, mb_rewards_acer, mb_mus, mb_dones_acer, mb_masks_acer]
 
-        ll = list(map(sf01, (mb_obs_ppo2, mb_returns, mb_dones_ppo2, mb_actions_ppo2, mb_values_ppo2, mb_neglogpacs)))
-        exp_ppo2 = [ll[0], ll[1], ll[2], ll[3], ll[4], ll[5], mb_states, epinfos]
+        #ll = list(map(sf01, (mb_obs_ppo2, mb_returns, mb_dones_ppo2, mb_actions_ppo2, mb_values_ppo2, mb_neglogpacs)))
+        #exp_ppo2 = [ll[0], ll[1], ll[2], ll[3], ll[4], ll[5], mb_states, epinfos]
 
         #self.q_exp[1].put(exp_ppo2)
         #self.q_exp[2].put(exp_acer)
