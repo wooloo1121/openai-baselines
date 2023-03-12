@@ -111,7 +111,7 @@ class Model(object):
 
         def _step(observation, **kwargs):
             act_model_p = tf.nn.softmax(act_model.pi)
-            return act_model._evaluate([act_model.action, act_model_p, act_model.state], observation, **kwargs)
+            return act_model._evaluate([act_model.action, act_model_p, act_model.state, act_model.q], observation, **kwargs)
 
         self.grads = grads
         self.var = var

@@ -75,12 +75,13 @@ class Runner(AbstractEnvRunner):
 
         # We initialize the lists that will contain the mb of experiences
         enc_obs = np.split(self.env.stackedobs, self.env.nstack, axis=-1)
-        mb_obs, mb_obs_acer, mb_rewards, mb_actions, mb_values, mb_values_ppo2, mb_dones, mb_dones_ppo2, mb_mus, mb_neglogpacs = [], [], [], [], [], [],[],[],[],[]
+        mb_obs, mb_rewards, mb_actions, mb_values, mb_values_ppo2, mb_dones = [], [], [], [], [], []
         mb_states = self.states
         epinfos = []
         #print("A2C self.obs: ")
         #print(np.shape(self.obs))
         count = [0,0,0]
+        value_sum = [0,0,0]
         for n in range(self.nsteps):
             # Given observations, take action and value (V(s))
             # We already have self.obs because Runner superclass run self.obs[:] = env.reset() on initi
@@ -92,26 +93,52 @@ class Runner(AbstractEnvRunner):
             mus_list = []
             for k in range(3):
                 tmp0, tmp1, tmp2, tmp3 = self.models[k].step(self.obs, S=self.states, M=self.dones)
-                _, tmp4, _ = self.models[k]._step(self.obs, S=self.states, M=self.dones)
+                _, tmp4, _, tmp5 = self.models[k]._step(self.obs, S=self.states, M=self.dones)
                 action_list.append(tmp0)
+                #print("agent " + str(k) + " selected action and likelihood:")
+                #print(tmp0)
                 value_list.append(tmp1)
                 state_list.append(tmp2)
                 likelihood_list.append(tmp3)
+                #print(tmp3)
                 mus_list.append(tmp4)
+                #print(tmp4)
+                #print("values: ")
+                #print(tmp1)
+                #print(tmp5)
+
+            value_sum[0] += sum(value_list[0])
+            value_sum[1] += sum(value_list[1])
+            value_sum[2] += sum([sum([tmp5[i,j]*mus_list[2][i,j] for j in range(6)]) for i in range(4)])
+            #print("a2c value_sum: ")
+            #print(value_sum)
+
             for k in range(4):
+                flag = 0
                 temp = [likelihood_list[0][k],likelihood_list[1][k],likelihood_list[2][k]]
                 temp_min = min(temp)
                 index = 0
-                threshold = -1 * math.log(1/self.nact) / 2
-                if temp_min < threshold:
+                threshold0 = -1 * math.log(1/self.nact) * 0.85
+                threshold1 = -1 * math.log(1/self.nact) * 0.75
+                #print("threshold0 = " + str(threshold0))
+                #print("threshold1 = " + str(threshold1))
+                for j in range(3):
+                    if likelihood_list[j][k] < threshold0 and (value_sum[j] == max(value_sum)):
+                        index = j
+                        flag = 1
+                        #print("agent selected by max value_sum!")
+                if temp_min < threshold1 and flag == 0:
                     index = temp.index(temp_min)
+                    #print("agent selected by min likelihood!")
+                #print("a2c selected agent:")
+                #print(index)
                 count[index] += 1
                 action_list[0][k] = action_list[index][k]
                 #value_list[0][k] = value_list[index][k]
                 #state_list[0][k] = state_list[index][k]
                 #likelihood_list[0][k] = likelihood_list[index][k]
                 #mus_list[0][k] = mus_list[index][k]
-                likelihood_list[0][k] = -1 * math.log(mus_list[0][k][action_list[0][k]])
+                #likelihood_list[0][k] = -1 * math.log(mus_list[0][k][action_list[0][k]])
 
 
             #actions, values, states, neglogpacs = self.model.step(self.obs, S=self.states, M=self.dones)
@@ -122,20 +149,20 @@ class Runner(AbstractEnvRunner):
             values = value_list[0]
             values_ppo2 = value_list[1]
             states = state_list[0]
-            neglogpacs = likelihood_list[0]
-            mus = mus_list[0]
+            #neglogpacs = likelihood_list[0]
+            #mus = mus_list[0]
 
 
             # Append the experiences
             mb_obs.append(np.copy(self.obs))
-            mb_obs_acer.append(np.copy(self.obs))
+            #mb_obs_acer.append(np.copy(self.obs))
             mb_actions.append(actions)
             mb_values.append(values)
             mb_values_ppo2.append(values_ppo2)
-            mb_mus.append(mus)
+            #mb_mus.append(mus)
             mb_dones.append(self.dones)
-            mb_dones_ppo2.append(self.dones)
-            mb_neglogpacs.append(neglogpacs)
+            #mb_dones_ppo2.append(self.dones)
+            #mb_neglogpacs.append(neglogpacs)
 
             # Take actions in env and look the results
             #print("A2C actions zise: ")
@@ -149,18 +176,22 @@ class Runner(AbstractEnvRunner):
             self.obs = obs
             mb_rewards.append(rewards)
             enc_obs.append(obs[..., -self.nc:])
-        mb_obs_acer.append(np.copy(self.obs))
+        #mb_obs_acer.append(np.copy(self.obs))
         mb_dones.append(self.dones)
 
         mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
         agent = count.index(max(count))
-        if agent != 0 and max(count) > 15:
+        #print("use agent " + str(agent) + " the most!")
+        if agent != 0 and max(count) > 10:
+            print("a2c count: ")
+            print(count)
             params = tf.trainable_variables("a2c_model")
             #print("a2c_model: ")
             #print(params)
             if agent == 1 and ppo2_param:
                 #print("ppo2_param received: ")
                 #print(ppo2_param)
+                print("a2c use ppo2 model")
                 for i in range(len(params)):
                     #params[i].assign(ppo2_param[i])
                     update = tf.assign(params[i],ppo2_param[i])
@@ -173,6 +204,7 @@ class Runner(AbstractEnvRunner):
             if agent == 2 and acer_param:
                 #print("acer_model received: ")
                 #print(acer_param)
+                print("a2c use acer model")
                 for i in range(len(params)-2):
                     #params[i].assign(acer_param[i])
                     update = tf.assign(params[i],acer_param[i])
@@ -184,27 +216,27 @@ class Runner(AbstractEnvRunner):
 
 
         # Batch of steps to batch of rollouts
-        enc_obs = np.asarray(enc_obs[0:511], dtype=self.obs_dtype).swapaxes(1, 0)
-        mb_obs_acer = np.asarray(mb_obs, dtype=self.obs_dtype).swapaxes(1, 0)
-        mb_obs_ppo2 = np.asarray(mb_obs, dtype=self.obs.dtype)
+        #enc_obs = np.asarray(enc_obs[0:511], dtype=self.obs_dtype).swapaxes(1, 0)
+        #mb_obs_acer = np.asarray(mb_obs, dtype=self.obs_dtype).swapaxes(1, 0)
+        #mb_obs_ppo2 = np.asarray(mb_obs, dtype=self.obs.dtype)
         mb_obs = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape)
-        mb_rewards_acer = np.asarray(mb_rewards[0:511], dtype=np.float32).swapaxes(1, 0)
+        #mb_rewards_acer = np.asarray(mb_rewards[0:511], dtype=np.float32).swapaxes(1, 0)
         #print("mb_rewards_acer shape: " + str(np.shape(mb_rewards_acer)))
         #print("mb_rewards shape: " + str(np.shape(mb_rewards)))
-        mb_rewards_ppo2 = np.asarray(mb_rewards, dtype=np.float32)
+        #mb_rewards_ppo2 = np.asarray(mb_rewards, dtype=np.float32)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
-        mb_actions_acer = np.asarray(mb_actions[0:511], dtype=self.ac_dtype).swapaxes(1, 0)
-        mb_actions_ppo2 = np.asarray(mb_actions)
+        #mb_actions_acer = np.asarray(mb_actions[0:511], dtype=self.ac_dtype).swapaxes(1, 0)
+        #mb_actions_ppo2 = np.asarray(mb_actions)
         mb_actions = np.asarray(mb_actions, dtype=self.model.train_model.action.dtype.name).swapaxes(1, 0)
         #mb_values_ppo2 = np.asarray(mb_values, dtype=np.float32)
         #mb_values = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
-        mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
-        mb_mus = np.asarray(mb_mus[0:511], dtype=np.float32).swapaxes(1, 0)
+        #mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
+        #mb_mus = np.asarray(mb_mus[0:511], dtype=np.float32).swapaxes(1, 0)
 
-        mb_dones_ppo2 = np.asarray(mb_dones_ppo2, dtype=np.bool)
-        mb_dones_acer = np.asarray(mb_dones_ppo2, dtype=np.bool).swapaxes(1, 0)
-        mb_masks_acer = mb_dones_acer
-        mb_dones_acer = mb_dones_acer[:, 1:]
+        #mb_dones_ppo2 = np.asarray(mb_dones_ppo2, dtype=np.bool)
+        #mb_dones_acer = np.asarray(mb_dones_ppo2, dtype=np.bool).swapaxes(1, 0)
+        #mb_masks_acer = mb_dones_acer
+        #mb_dones_acer = mb_dones_acer[:, 1:]
         mb_dones = np.asarray(mb_dones, dtype=np.bool).swapaxes(1, 0)
         mb_masks = mb_dones[:, :-1]
         mb_dones = mb_dones[:, 1:]

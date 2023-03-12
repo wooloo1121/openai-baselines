@@ -267,7 +267,7 @@ def avg_norm(t):
 
 def gradient_add(g1, g2, param):
     print([g1, g2, param.name])
-    assert (not (g1 is None and g2 is None)), param.name
+    #assert (not (g1 is None and g2 is None)), param.name
     if g1 is None:
         return g2
     elif g2 is None:

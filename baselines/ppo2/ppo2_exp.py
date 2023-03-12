@@ -138,7 +138,7 @@ def build_env(args):
 
 def learn(args, extra_args, q_exp, q_model, network, eval_env = None, nsteps=2048, ent_coef=0.0, lr=3e-4,
             vf_coef=0.5,  max_grad_norm=0.5, gamma=0.99, lam=0.95,
-            log_interval=10, nminibatches=4, noptepochs=4, cliprange=0.2,
+            log_interval=1, nminibatches=4, noptepochs=4, cliprange=0.2,
             save_interval=0, load_path=None, model_fn=None, update_fn=None, init_fn=None, mpi_rank_weight=1, comm=None):
     '''
     Learn policy using PPO algorithm (https://arxiv.org/abs/1707.06347)

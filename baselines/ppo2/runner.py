@@ -60,12 +60,13 @@ class Runner(AbstractEnvRunner):
 
 
         # Here, we init the lists that will contain the mb of experiences
-        enc_obs = np.split(self.env.stackedobs, self.env.nstack, axis=-1)
-        mb_obs, mb_obs_acer, mb_rewards, mb_rewards_a2c, mb_actions, mb_values, mb_values_a2c, mb_dones, mb_dones_acer, mb_neglogpacs, mb_neglogpacs_a2c, mb_neglogpacs_acer, mb_mus = [], [], [], [], [], [], [], [], [], [], [], [], []
+        #enc_obs = np.split(self.env.stackedobs, self.env.nstack, axis=-1)
+        mb_obs, mb_rewards, mb_actions, mb_values, mb_values_a2c, mb_dones, mb_neglogpacs, mb_neglogpacs_a2c, mb_neglogpacs_acer = [], [], [], [], [], [], [], [], []
         mb_states = self.states
         epinfos = []
         # For n in range number of steps
         count = [0,0,0]
+        value_sum = [0,0,0]
         for _ in range(self.nsteps):
             #print("PPO2 self.obs: ")
             #print(np.shape(self.obs))
@@ -79,18 +80,27 @@ class Runner(AbstractEnvRunner):
             mus_list = []
             for k in range(3):
                 tmp0, tmp1, tmp2, tmp3 = self.models[k].step(self.obs, S=self.states, M=self.dones)
-                _, tmp4, _ = self.models[k]._step(self.obs, S=self.states, M=self.dones)
+                _, tmp4, _, tmp5 = self.models[k]._step(self.obs, S=self.states, M=self.dones)
                 action_list.append(tmp0)
                 value_list.append(tmp1)
                 state_list.append(tmp2)
                 likelihood_list.append(tmp3)
                 mus_list.append(tmp4)
+            value_sum[0] += sum(value_list[0])
+            value_sum[1] += sum(value_list[1])
+            value_sum[2] += sum([sum([tmp5[i,j]*mus_list[2][i,j] for j in range(6)]) for i in range(4)])
             for k in range(4):
+                flag = 0
                 temp = [likelihood_list[0][k],likelihood_list[1][k],likelihood_list[2][k]]
                 temp_min = min(temp)
                 index = 1
-                threshold = -1 * math.log(1/self.nact) / 2
-                if temp_min < threshold:
+                threshold0 = -1 * math.log(1/self.nact) * 0.85
+                threshold1 = -1 * math.log(1/self.nact) * 0.75
+                for j in range(3):
+                    if likelihood_list[j][k] < threshold0 and (value_sum[j] == max(value_sum)):
+                        index = j
+                        flag = 1
+                if temp_min < threshold1 and flag == 0:
                     index = temp.index(temp_min)
                 count[index] += 1
                 action_list[0][k] = action_list[index][k]
@@ -115,22 +125,22 @@ class Runner(AbstractEnvRunner):
             neglogpacs = likelihood_list[1]
             neglogpacs_a2c = likelihood_list[0]
             neglogpacs_acer = likelihood_list[2]
-            mus = mus_list[1]
+            #mus = mus_list[1]
 
 
             #_, mus, _ = self.model._step(self.obs, S=self.states, M=self.dones)
             #actions, values, self.states, neglogpacs = self.model.step(self.obs, S=self.states, M=self.dones)
             mb_obs.append(self.obs.copy())
-            mb_obs_acer.append(np.copy(self.obs))
+            #mb_obs_acer.append(np.copy(self.obs))
             mb_actions.append(actions)
-            mb_mus.append(mus)
+            #mb_mus.append(mus)
             mb_values.append(values)
             mb_values_a2c.append(values_a2c)
             mb_neglogpacs.append(neglogpacs)
             mb_neglogpacs_a2c.append(neglogpacs_a2c)
             mb_neglogpacs_acer.append(neglogpacs_acer)
             mb_dones.append(self.dones)
-            mb_dones_acer.append(self.dones)
+            #mb_dones_acer.append(self.dones)
 
             # Take actions in env and look the results
             # Infos contains a ton of useful informations
@@ -142,39 +152,42 @@ class Runner(AbstractEnvRunner):
                 maybeepinfo = info.get('episode')
                 if maybeepinfo: epinfos.append(maybeepinfo)
             mb_rewards.append(rewards)
-            mb_rewards_a2c.append(rewards)
-            enc_obs.append(obs[..., -self.nc:])
-        mb_obs_acer.append(np.copy(self.obs))
-        mb_dones_acer.append(self.dones)
+            #mb_rewards_a2c.append(rewards)
+            #enc_obs.append(obs[..., -self.nc:])
+        #mb_obs_acer.append(np.copy(self.obs))
+        #mb_dones_acer.append(self.dones)
         #batch of steps to batch of rollouts
-        enc_obs = np.asarray(enc_obs, dtype=self.obs_dtype).swapaxes(1, 0)
-        mb_obs_acer = np.asarray(mb_obs_acer, dtype=self.obs_dtype).swapaxes(1, 0)
-        mb_obs_a2c = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape)
+        #enc_obs = np.asarray(enc_obs, dtype=self.obs_dtype).swapaxes(1, 0)
+        #mb_obs_acer = np.asarray(mb_obs_acer, dtype=self.obs_dtype).swapaxes(1, 0)
+        #mb_obs_a2c = np.asarray(mb_obs, dtype=self.ob_dtype).swapaxes(1, 0).reshape(self.batch_ob_shape)
         mb_obs = np.asarray(mb_obs, dtype=self.obs.dtype)
-        mb_rewards_a2c = np.asarray(mb_rewards_a2c, dtype=np.float32).swapaxes(1, 0)
-        mb_rewards_acer = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
+        #mb_rewards_a2c = np.asarray(mb_rewards_a2c, dtype=np.float32).swapaxes(1, 0)
+        #mb_rewards_acer = np.asarray(mb_rewards, dtype=np.float32).swapaxes(1, 0)
         mb_rewards = np.asarray(mb_rewards, dtype=np.float32)
-        mb_actions_acer = np.asarray(mb_actions, dtype=self.ac_dtype).swapaxes(1, 0)
-        mb_actions_a2c = np.asarray(mb_actions, dtype=self.model.train_model.action.dtype.name).swapaxes(1, 0)
+        #mb_actions_acer = np.asarray(mb_actions, dtype=self.ac_dtype).swapaxes(1, 0)
+        #mb_actions_a2c = np.asarray(mb_actions, dtype=self.model.train_model.action.dtype.name).swapaxes(1, 0)
         mb_actions = np.asarray(mb_actions)
         #mb_values_a2c = np.asarray(mb_values, dtype=np.float32).swapaxes(1, 0)
         mb_values = np.asarray(mb_values, dtype=np.float32)
         mb_neglogpacs = np.asarray(mb_neglogpacs, dtype=np.float32)
-        mb_mus = np.asarray(mb_mus, dtype=np.float32).swapaxes(1, 0)
-        mb_dones_acer = np.asarray(mb_dones_acer, dtype=np.bool).swapaxes(1, 0)
+        #mb_mus = np.asarray(mb_mus, dtype=np.float32).swapaxes(1, 0)
+        #mb_dones_acer = np.asarray(mb_dones_acer, dtype=np.bool).swapaxes(1, 0)
         mb_dones = np.asarray(mb_dones, dtype=np.bool)
-        mb_masks_a2c = mb_dones_acer[:, :-1]
-        mb_masks = mb_dones_acer # Used for statefull models like LSTM's to mask state when done
-        mb_dones_acer = mb_dones_acer[:, 1:]
+        #mb_masks_a2c = mb_dones_acer[:, :-1]
+        #mb_masks = mb_dones_acer # Used for statefull models like LSTM's to mask state when done
+        #mb_dones_acer = mb_dones_acer[:, 1:]
 
         #print("ppo2 self.obs shape at last_values: ")
         #print(np.shape(self.obs))
 
 
         agent = count.index(max(count))
-        if agent != 1 and max(count) > 6144:
+        if agent != 1 and max(count) > 4096:
+            print("ppo2 count: ")
+            print(count)
             params = tf.trainable_variables("ppo2_model")
             if agent == 0 and a2c_param:
+                print("ppo2 use a2c model")
                 for i in range(len(params)):
                     #params[i].assign(a2c_param[i])
                     update = tf.assign(params[i],a2c_param[i])
@@ -182,6 +195,7 @@ class Runner(AbstractEnvRunner):
                 mb_values = np.asarray(mb_values_a2c, dtype=np.float32)
                 mb_neglogpacs = np.asarray(mb_neglogpacs_a2c, dtype=np.float32)
             if agent == 2 and acer_param:
+                print("ppo2 use acer model")
                 for i in range(len(params)-2):
                     #params[i].assign(acer_param[i])
                     update = tf.assign(params[i],acer_param[i])

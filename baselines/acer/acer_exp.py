@@ -335,7 +335,7 @@ class Model(object):
             return names_ops, sess.run(run_ops, td_map)[1:]  # strip off _train
 
         def _step(observation, **kwargs):
-            return step_model._evaluate([step_model.action, step_model_p, step_model.state], observation, **kwargs)
+            return step_model._evaluate([step_model.action, step_model_p, step_model.state, step_model.sv], observation, **kwargs)
 
 
 
@@ -436,8 +436,8 @@ class Acer():
         self.q_model[2].put(param_val)
 
 
-        print("acer update: " + str(int(steps/runner.nbatch)))
         if on_policy and (int(steps/runner.nbatch) % self.log_interval == 0):
+            print("acer update: " + str(int(steps/runner.nbatch)))
             self.logger.logkv("total_timesteps", steps)
             self.logger.logkv("fps", int(steps/(time.time() - self.tstart)))
             # IMP: In EpisodicLife env, during training, we get done=True at each loss of life, not just at the terminal state.
@@ -453,7 +453,7 @@ class Acer():
 def learn(args, extra_args, q_exp, q_model, network, nsteps=20,#511,
           q_coef=0.5, ent_coef=0.01,
           max_grad_norm=10, lr=7e-4, lrschedule='linear', rprop_epsilon=1e-5, rprop_alpha=0.99, gamma=0.99,
-          log_interval=100, buffer_size=50000, replay_ratio=4, replay_start=10000, c=10.0,
+          log_interval=500, buffer_size=50000, replay_ratio=4, replay_start=10000, c=10.0,
           trust_region=True, alpha=0.99, delta=1, load_path=None):
 
     '''

@@ -231,7 +231,7 @@ class Model(object):
 
         def _step(observation, **kwargs):
             step_model_p = tf.nn.softmax(step_model.pi)
-            return step_model._evaluate([step_model.action, step_model_p, step_model.state], observation, **kwargs)
+            return step_model._evaluate([step_model.action, step_model_p, step_model.state, step_model.q], observation, **kwargs)
 
 
         self.train = train
@@ -261,7 +261,7 @@ def learn(
     epsilon=1e-5,
     alpha=0.99,
     gamma=0.99,
-    log_interval=100,
+    log_interval=10,
     load_path=None):
 
     '''
@@ -350,7 +350,7 @@ def learn(
     tstart = time.time()
 
     for update in range(1, total_timesteps//nbatch+1):
-        print("a2c update: " + str(update))
+        #print("a2c update: " + str(update))
         # Get mini batch of experiences
         ret = runner.run()
         for i in range(len(ret)):
@@ -373,6 +373,7 @@ def learn(
         # Calculate the fps (frame per second)
         fps = int((update*nbatch)/nseconds)
         if update % log_interval == 0 or update == 1:
+            print("a2c update: " + str(update))
             # Calculates if value function is a good predicator of the returns (ev > 1)
             # or if it's just worse than predicting nothing (ev =< 0)
             ev = explained_variance(values, rewards)

@@ -60,6 +60,8 @@ class PolicyWithValue(object):
         self.q = fc(vf_latent, 'q', env.action_space.n)
         if estimate_q:
             self.vf = self.q
+            self.sv = fc(vf_latent, 'vf', 1)
+            self.sv = self.sv[:,0]
         else:
             self.vf = fc(vf_latent, 'vf', 1)
             self.vf = self.vf[:,0]
